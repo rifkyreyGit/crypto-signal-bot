@@ -1,5 +1,6 @@
 import './style.css';
 import { createChart } from 'lightweight-charts';
+import { Capacitor } from '@capacitor/core';
 import { App as CapApp } from '@capacitor/app';
 import { candles, tickers, pool } from './api.js';
 import { PARAMS, EXIT_MODES, btcRegime, breakevenStop, indicators, status, backtest, stats } from './strategy.js';
@@ -202,8 +203,10 @@ function infoView() {
     <div class="card settings">
       <h3>Pengaturan</h3>
       <label>Modal per posisi (paper)<input type="number" id="stake" inputmode="numeric" value="${s.stake}" min="10000" step="10000"></label>
+      ${Capacitor.isNativePlatform() ? `
       <label class="sw"><span>Notifikasi sinyal & jual</span><input type="checkbox" id="notif" ${s.notif ? 'checked' : ''}></label>
-      <label class="sw"><span>Pengingat harian 07:05</span><input type="checkbox" id="reminder" ${s.reminder ? 'checked' : ''}></label>
+      <label class="sw"><span>Pengingat harian 07:05</span><input type="checkbox" id="reminder" ${s.reminder ? 'checked' : ''}></label>`
+      : '<p class="hint">Versi web tidak bisa mengirim notifikasi. Buka app setelah 07:00 WIB (candle harian tutup) untuk cek sinyal baru.</p>'}
     </div>
     <p class="disclaimer">Paper trading saja: app ini tidak terhubung ke akun Indodax dan tidak mengeksekusi order. Bukan saran investasi.</p>`;
 }
@@ -339,8 +342,11 @@ document.addEventListener('change', async (e) => {
   await save('settings');
 });
 
-CapApp.addListener('resume', () => { if (!view.updated || Date.now() - view.updated > 5 * 60000) refresh(); });
-CapApp.addListener('backButton', () => {
+// Muat ulang saat app kembali dibuka (HP Android maupun web app di iPhone).
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && (!view.updated || Date.now() - view.updated > 5 * 60000)) refresh();
+});
+if (Capacitor.isNativePlatform()) CapApp.addListener('backButton', () => {
   if ($('#overlay').classList.contains('show')) closeDetail();
   else if (view.tab !== 'signals') { view.tab = 'signals'; render(); }
   else CapApp.minimizeApp();
