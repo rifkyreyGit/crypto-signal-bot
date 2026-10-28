@@ -1,0 +1,110 @@
+{
+  "$schema": "https://schema.freqtrade.io/schema.json",
+  "max_open_trades": 9,
+  "stake_currency": "IDR",
+  "stake_amount": "unlimited",
+  "tradable_balance_ratio": 0.99,
+  "dry_run": true,
+  "dry_run_wallet": 1000000,
+  "cancel_open_orders_on_exit": false,
+  "trading_mode": "spot",
+  "margin_mode": "",
+  "unfilledtimeout": {
+    "entry": 10,
+    "exit": 10,
+    "exit_timeout_count": 0,
+    "unit": "minutes"
+  },
+  "entry_pricing": {
+    "price_side": "other",
+    "use_order_book": true,
+    "order_book_top": 1,
+    "price_last_balance": 0.0,
+    "check_depth_of_market": {
+      "enabled": false,
+      "bids_to_ask_delta": 1
+    }
+  },
+  "exit_pricing": {
+    "price_side": "other",
+    "use_order_book": true,
+    "order_book_top": 1
+  },
+  "exchange": {
+    "name": "indodax",
+    "api_key": "",
+    "secret": "",
+    "ccxt_config": {},
+    "ccxt_async_config": {},
+    "pair_whitelist": [
+      "BTC/IDR",
+      "BEAT/IDR",
+      "PEPE/IDR",
+      "SOL/IDR",
+      "XRP/IDR",
+      "ETH/IDR",
+      "HYPE/IDR",
+      "FARTCOIN/IDR",
+      "HAEDAL/IDR",
+      "BR/IDR",
+      "QNT/IDR",
+      "PIPPIN/IDR",
+      "SUI/IDR",
+      "DOGE/IDR",
+      "ADA/IDR",
+      "BNB/IDR",
+      "ONDO/IDR",
+      "ASTER/IDR",
+      "SKYAI/IDR",
+      "PUFFER/IDR",
+      "ENA/IDR",
+      "NEAR/IDR",
+      "STRK/IDR",
+      "PENGU/IDR",
+      "MYX/IDR",
+      "HBAR/IDR",
+      "SHIB/IDR",
+      "WLD/IDR",
+      "TRX/IDR"
+    ],
+    "pair_blacklist": []
+  },
+  "pairlists": [
+    {
+      "method": "StaticPairList"
+    }
+  ],
+  "api_server": {
+    "enabled": true,
+    "listen_ip_address": "127.0.0.1",
+    "listen_port": 8080,
+    "verbosity": "error",
+    "enable_openapi": false,
+    "jwt_secret_key": "GANTI-dengan-string-acak-panjang",
+    "ws_token": "GANTI-dengan-string-acak",
+    "CORS_origins": [
+      "https://sinyal-kripto.pages.dev"
+    ],
+    "username": "GANTI-username",
+    "password": "GANTI-password-acak-panjang"
+  },
+  "bot_name": "breakout-tren",
+  "initial_state": "running",
+  "force_entry_enable": false,
+  "internals": {
+    "process_throttle_secs": 5
+  },
+  "order_types": {
+    "entry": "limit",
+    "exit": "limit",
+    "emergency_exit": "limit",
+    "stoploss": "limit",
+    "stoploss_on_exchange": false
+  },
+  "telegram": {
+    "enabled": false,
+    "token": "",
+    "chat_id": ""
+  },
+  "strategy": "BreakoutTren"
+}
