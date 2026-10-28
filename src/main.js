@@ -188,7 +188,7 @@ function infoView() {
         <li><b>JUAL</b> jika close harian turun di bawah MA20.</li>
         <li><b>Stop loss</b> di harga masuk − ${PARAMS.stopAtr}× ATR14, lalu naik ke impas sesuai mode exit.</li>
       </ol>
-      <p class="hint">Hasil uji pada 18 koin (biaya 0,8% per transaksi pulang-pergi). Parameter dipilih di data 2020–2022, lalu diuji di data 2023–Okt 2026 yang tidak dipakai untuk memilih.</p>
+      <p class="hint">Bot dan app memantau 29 koin Indodax dengan volume terbesar dan spread ≤ 0,5% (dipilih 28 Okt 2026). Angka di bawah dari uji awal pada 18 koin (biaya 0,8% per transaksi pulang-pergi). Parameter dipilih di data 2020–2022, lalu diuji di data 2023–Okt 2026 yang tidak dipakai untuk memilih.</p>
     </div>
     <div class="card">
       <h3>Mode exit</h3>

@@ -1,8 +1,9 @@
 // Penyimpanan lokal di HP (posisi paper trading, riwayat, pengaturan). Tidak ada server.
 import { Preferences } from '@capacitor/preferences';
 
-export const DEFAULT_COINS = ['BTC', 'ETH', 'XRP', 'SOL', 'BNB', 'DOGE', 'ADA', 'SUI', 'TRX', 'LINK',
-  'LTC', 'NEAR', 'AVAX', 'DOT', 'TON', 'UNI', 'PEPE', 'SHIB'];
+export const DEFAULT_COINS = ['BTC', 'ETH', 'SOL', 'XRP', 'BNB', 'DOGE', 'ADA', 'SUI', 'TRX', 'NEAR',
+  'PEPE', 'SHIB', 'HBAR', 'QNT', 'WLD', 'ENA', 'ONDO', 'STRK', 'PENGU', 'HYPE', 'PUFFER', 'FARTCOIN',
+  'HAEDAL', 'PIPPIN', 'BR', 'ASTER', 'MYX', 'BEAT', 'SKYAI'];
 
 const DEFAULTS = {
   coins: DEFAULT_COINS,

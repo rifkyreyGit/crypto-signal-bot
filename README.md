@@ -8,7 +8,7 @@ App Android untuk sinyal crypto Indodax (pair IDR, candle harian). Mandiri: data
 - **JUAL**: close di bawah MA20
 - **Stop**: masuk − 3×ATR14, lalu naik ke impas (+0,2% bersih) sesuai mode exit
 
-Uji 18 koin, biaya 0,8% pulang-pergi. Parameter dipilih di data 2020–2022, diuji di data 2023–Okt 2026:
+Daftar koin: 29 koin Indodax dengan volume terbesar dan spread ≤ 0,5% (28 Okt 2026). Uji awal pada 18 koin, biaya 0,8% pulang-pergi. Parameter dipilih di data 2020–2022, diuji di data 2023–Okt 2026:
 
 | Mode | Win rate | Rata-rata/transaksi | Profit factor |
 |---|---|---|---|
