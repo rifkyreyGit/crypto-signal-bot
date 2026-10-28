@@ -6,7 +6,7 @@ import { candles, tickers, pool } from './api.js';
 import { PARAMS, EXIT_MODES, btcRegime, breakevenStop, indicators, status, backtest, stats } from './strategy.js';
 import { state, load, save, openPosition, closePosition } from './store.js';
 import { notify, setDailyReminder, ensurePermission } from './notify.js';
-import { botConfigured, fetchBot, saveBotLogin } from './bot.js';
+import { botConfigured, fetchBot, saveBotLogin, sellNow } from './bot.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const view = { tab: 'signals', filter: 'all', rows: [], tick: {}, regime: null, updated: null, loading: false, error: null };
@@ -338,7 +338,8 @@ function botView() {
       <div class="grid2" style="margin-top:10px">
         <span>Masuk<b>${rp(t.entry)}</b></span><span>Sekarang<b>${rp(t.now)}</b></span>
         <span>Stop${t.stop >= t.entry ? ' impas ✓' : ''}<b>${rp(t.stop)}</b></span><span>Modal<b>${rp(t.stake)}</b></span>
-      </div></div>`).join('') || '<p class="empty">Belum ada posisi. Bot menunggu sinyal breakout.</p>'}</div>
+      </div>
+      <button class="btn danger" data-sell="${t.id}" ${view.selling === t.id ? 'disabled' : ''}>${view.selling === t.id ? 'Menjual…' : `Jual sekarang di ±${rp(t.now)}`}</button></div>`).join('') || '<p class="empty">Belum ada posisi. Bot menunggu sinyal breakout.</p>'}</div>
     <h3>Transaksi selesai (${n})</h3>
     <div class="list">${b.closed.slice(0, 20).map((t) => `<div class="card trade">
       <div class="grow"><b>${esc(t.pair)}</b><small>${ago(t.opened)} → ${ago(t.closedAt)} · ${esc(EXIT_TEXT[t.why] ?? t.why)}</small></div>
@@ -385,6 +386,17 @@ document.addEventListener('click', async (e) => {
     if (view.tab === 'bot' && (!view.botUpdated || Date.now() - view.botUpdated > 60000)) loadBot();
   }
   if (t.dataset.bot === 'edit') { view.botEdit = true; render(); }
+  if (t.dataset.sell && !view.selling) {
+    const p = view.bot?.open.find((x) => String(x.id) === t.dataset.sell);
+    if (!p) return;
+    const akun = view.bot.dryRun ? 'saldo simulasi (dry-run)' : 'UANG SUNGGUHAN';
+    if (!confirm(`Jual ${p.pair} sekarang?\n\nHarga ±${rp(p.now)} · hasil ${pct(p.ret, 2)} (${rp(p.pnl)})\nAkun: ${akun}\n\nBot akan menjual di harga pasar saat ini.`)) return;
+    view.selling = p.id; render();
+    try { await sellNow(p.id); view.botError = null; }
+    catch (err) { view.botError = `Gagal menjual ${p.pair}: ${err.message}`; }
+    finally { view.selling = null; }
+    setTimeout(loadBot, 1500);
+  }
   if (t.id === 'bot-save') {
     await saveBotLogin($('#bot-url').value, $('#bot-user').value, $('#bot-pass').value);
     view.botEdit = false; view.bot = null; loadBot();
