@@ -1,0 +1,11 @@
+{
+  "appId": "id.rey.sinyalkripto",
+  "appName": "Sinyal Kripto",
+  "webDir": "dist",
+  "backgroundColor": "#0b0f14",
+  "plugins": {
+    "CapacitorHttp": { "enabled": true },
+    "LocalNotifications": { "iconColor": "#22c58b" }
+  },
+  "android": { "allowMixedContent": false }
+}
