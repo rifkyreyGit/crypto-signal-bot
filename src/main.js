@@ -165,18 +165,35 @@ function positionsView() {
   }).join('')}</div>`;
 }
 
+function botHistory() {
+  if (!botConfigured()) return '';
+  const b = view.bot;
+  if (!b) return `<h3>Transaksi bot</h3>${view.botError ? `<p class="alert">${esc(view.botError)}</p>` : '<div class="skeleton"></div>'}`;
+  const n = b.wins + b.losses, pnl = b.closed.reduce((s, t) => s + t.pnl, 0);
+  return `<h3>Transaksi bot ${b.dryRun ? '(dry-run)' : '(uang sungguhan)'}</h3>
+    <div class="card summary">
+      <div><small>Win rate bot</small><b>${n ? nf(0).format((b.wins / n) * 100) + '%' : '-'}</b></div>
+      <div><small>Transaksi</small><b>${n}</b></div>
+      <div><small>Total P/L</small><b class="${cls(pnl)}">${rp(pnl)}</b></div>
+    </div>
+    <div class="list" style="margin-top:8px">${b.closed.map((t) => `<div class="card trade">
+      <div class="grow"><b>${esc(t.pair)}</b><small>${ago(t.opened)} → ${ago(t.closedAt)} · ${esc(EXIT_TEXT[t.why] ?? t.why)}</small></div>
+      <div class="right"><b class="${cls(t.ret)}">${pct(t.ret, 2)}</b><small>${rp(t.pnl)}</small></div></div>`).join('') || '<p class="empty">Bot belum menutup posisi.</p>'}</div>`;
+}
+
 function historyView() {
   const c = state.closed, w = c.filter((t) => t.ret > 0).length, pnl = c.reduce((s, t) => s + t.pnl, 0);
-  return `<div class="card summary">
+  return `${botHistory()}
+    <h3>Catatan manual kamu</h3>
+    <div class="card summary">
       <div><small>Win rate kamu</small><b>${c.length ? nf(0).format((w / c.length) * 100) + '%' : '-'}</b></div>
       <div><small>Transaksi</small><b>${c.length}</b></div>
       <div><small>Total P/L</small><b class="${cls(pnl)}">${rp(pnl)}</b></div>
     </div>
-    <h3>Riwayat posisi</h3>
-    <div class="list">${c.map((t) => `<div class="card trade">
+    <div class="list" style="margin-top:8px">${c.map((t) => `<div class="card trade">
       <div class="grow"><b>${t.coin}</b><small>${new Date(t.openedAt).toLocaleDateString('id-ID')} → ${new Date(t.closedAt).toLocaleDateString('id-ID')} · ${t.why}</small></div>
       <div class="right"><b class="${cls(t.ret)}">${pct(t.ret, 2)}</b><small>${rp(t.pnl)}</small></div>
-    </div>`).join('') || '<p class="empty">Belum ada posisi yang ditutup.</p>'}</div>`;
+    </div>`).join('') || '<p class="empty">Belum ada. Ini untuk posisi yang kamu catat sendiri lewat "Catat beli" di tab Sinyal.</p>'}</div>`;
 }
 
 function infoView() {
@@ -380,10 +397,10 @@ document.addEventListener('click', async (e) => {
   const t = e.target.closest('button');
   if (e.target.id === 'overlay') return closeDetail();
   if (!t) return;
-  if (t.id === 'refresh') return view.tab === 'bot' ? loadBot() : refresh();
+  if (t.id === 'refresh') return view.tab === 'bot' || view.tab === 'history' ? loadBot() : refresh();
   if (t.dataset.tab) {
     view.tab = t.dataset.tab; render(); window.scrollTo(0, 0);
-    if (view.tab === 'bot' && (!view.botUpdated || Date.now() - view.botUpdated > 60000)) loadBot();
+    if ((view.tab === 'bot' || view.tab === 'history') && (!view.botUpdated || Date.now() - view.botUpdated > 60000)) loadBot();
   }
   if (t.dataset.bot === 'edit') { view.botEdit = true; render(); }
   if (t.dataset.sell && !view.selling) {
