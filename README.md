@@ -27,6 +27,15 @@ npm run dev     # coba di browser (proxy ke Indodax)
 npm run apk     # APK debug di android/app/build/outputs/apk/debug/
 ```
 
+### iPhone (web app)
+
+```bash
+npx wrangler login   # sekali saja
+npm run deploy       # Cloudflare Pages + proxy Indodax di functions/
+```
+
+Buka URL `*.pages.dev` di Safari iPhone → Bagikan → Tambah ke Layar Utama. Versi web tidak punya notifikasi.
+
 Butuh JDK 21 (`brew install openjdk@21`) dan Android SDK (`JAVA_HOME`, `ANDROID_HOME`).
 
 ## Uji paritas JS vs Python
