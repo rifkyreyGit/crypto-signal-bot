@@ -6,6 +6,7 @@ import { candles, tickers, pool } from './api.js';
 import { PARAMS, EXIT_MODES, btcRegime, breakevenStop, indicators, status, backtest, stats } from './strategy.js';
 import { state, load, save, openPosition, closePosition } from './store.js';
 import { notify, setDailyReminder, ensurePermission } from './notify.js';
+import { botConfigured, fetchBot, saveBotLogin } from './bot.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const view = { tab: 'signals', filter: 'all', rows: [], tick: {}, regime: null, updated: null, loading: false, error: null };
@@ -291,22 +292,81 @@ function drawChart(el, x) {
   };
 }
 
+// ---------- bot (freqtrade di Mac) ----------
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+const EXIT_TEXT = { 'close<ma20': 'Close < MA20', trailing_stop_loss: 'Stop impas', stop_loss: 'Stop loss', force_exit: 'Ditutup manual' };
+const ago = (d) => new Date(d.replace(' ', 'T') + (d.endsWith('Z') || d.includes('+') ? '' : 'Z')).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' });
+
+async function loadBot() {
+  if (!botConfigured() || view.botLoading) return;
+  view.botLoading = true; view.botError = null; render();
+  try { view.bot = await fetchBot(); view.botUpdated = new Date(); }
+  catch (e) { view.botError = /^(Bot|Username|URL|Tunnel)/.test(e.message) ? e.message : `Bot tidak bisa dihubungi di ${state.bot.url}. Cek URL-nya, dan pastikan Mac menyala serta bot dan tunnel jalan.`; }
+  finally { view.botLoading = false; render(); }
+}
+
+function botLoginForm() {
+  const b = state.bot;
+  return `<div class="card settings">
+      <h3>Hubungkan ke bot</h3>
+      <p class="hint">Isi dari file <b>bot-login.txt</b> di folder freqtrade di Mac.</p>
+      <label>URL bot<input id="bot-url" type="url" inputmode="url" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="https://…" value="${esc(b.url)}"></label>
+      <label>Username<input id="bot-user" autocapitalize="off" autocorrect="off" spellcheck="false" autocomplete="username" value="${esc(b.user)}"></label>
+      <label>Password<input id="bot-pass" type="password" autocomplete="current-password" value="${esc(b.pass)}"></label>
+      <button class="btn primary" id="bot-save">Simpan & hubungkan</button>
+    </div>
+    <p class="disclaimer">App hanya membaca data bot. Beli/jual tetap dilakukan bot sendiri.</p>`;
+}
+
+function botView() {
+  if (!botConfigured() || view.botEdit) return botLoginForm();
+  const b = view.bot;
+  if (!b) return view.botError ? `<p class="alert">${esc(view.botError)}</p><button class="btn ghost" data-bot="edit">Ubah koneksi</button>`
+    : '<div class="skeleton"></div>'.repeat(3);
+  const n = b.wins + b.losses, ret = b.profit / b.start;
+  return `${view.botError ? `<p class="alert">${esc(view.botError)}</p>` : ''}
+    <div class="banner ${b.dryRun ? 'good' : 'bad'}"><b>${b.dryRun ? 'DRY-RUN · saldo simulasi' : 'LIVE · uang sungguhan'}</b>
+      <span>${esc(b.strategy)} · status ${esc(b.state)} · ${b.open.length}/${b.maxOpen} posisi</span></div>
+    <div class="card summary">
+      <div><small>Saldo</small><b>${rp(b.total)}</b></div>
+      <div><small>Profit</small><b class="${cls(ret)}">${pct(ret)}</b></div>
+      <div><small>Win rate</small><b>${n ? nf(0).format((b.wins / n) * 100) + '%' : '-'}</b></div>
+    </div>
+    <h3>Posisi terbuka</h3>
+    <div class="list">${b.open.map((t) => `<div class="card pos">
+      <div class="row"><b>${esc(t.pair)}</b><span class="${cls(t.ret)}">${pct(t.ret, 2)} · ${rp(t.pnl)}</span></div>
+      <div class="grid2" style="margin-top:10px">
+        <span>Masuk<b>${rp(t.entry)}</b></span><span>Sekarang<b>${rp(t.now)}</b></span>
+        <span>Stop${t.stop >= t.entry ? ' impas ✓' : ''}<b>${rp(t.stop)}</b></span><span>Modal<b>${rp(t.stake)}</b></span>
+      </div></div>`).join('') || '<p class="empty">Belum ada posisi. Bot menunggu sinyal breakout.</p>'}</div>
+    <h3>Transaksi selesai (${n})</h3>
+    <div class="list">${b.closed.slice(0, 20).map((t) => `<div class="card trade">
+      <div class="grow"><b>${esc(t.pair)}</b><small>${ago(t.opened)} → ${ago(t.closedAt)} · ${esc(EXIT_TEXT[t.why] ?? t.why)}</small></div>
+      <div class="right"><b class="${cls(t.ret)}">${pct(t.ret, 2)}</b><small>${rp(t.pnl)}</small></div></div>`).join('') || '<p class="empty">Belum ada.</p>'}</div>
+    <button class="btn ghost" data-bot="edit">Ubah koneksi bot</button>`;
+}
+
 // ---------- shell ----------
 const TABS = [
   ['signals', 'Sinyal', 'M3 17l6-6 4 4 8-8M15 7h6v6'],
+  ['bot', 'Bot', 'M5 9h14v10H5zM9 13h.01M15 13h.01M12 5v4M10 16h4'],
   ['positions', 'Posisi', 'M4 7h16v12H4zM9 7V5h6v2'],
   ['history', 'Riwayat', 'M12 8v4l3 2M3 12a9 9 0 1 0 3-6.7M3 4v4h4'],
   ['info', 'Info', 'M12 16v-4M12 8h.01M12 3a9 9 0 1 1 0 18 9 9 0 0 1 0-18'],
 ];
 
 function render() {
-  const body = { signals: signalsView, positions: positionsView, history: historyView, info: infoView }[view.tab]();
+  const body = { signals: signalsView, bot: botView, positions: positionsView, history: historyView, info: infoView }[view.tab]();
   const last = view.rows.find((r) => r.x)?.x.at(-1);
+  const sub = view.tab === 'bot'
+    ? (view.botLoading ? 'Menghubungi bot…' : view.botUpdated ? `Data bot · cek ${view.botUpdated.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}` : '')
+    : view.loading ? 'Memuat data Indodax…' : view.updated ? `Candle ${date(last.time)} · cek ${view.updated.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}` : '';
+  const spinning = view.tab === 'bot' ? view.botLoading : view.loading;
   $('#app').innerHTML = `
     <header>
       <div><h1>${TABS.find((t) => t[0] === view.tab)[1]}</h1>
-        <small>${view.loading ? 'Memuat data Indodax…' : view.updated ? `Candle ${date(last.time)} · cek ${view.updated.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}` : ''}</small></div>
-      <button id="refresh" class="icon ${view.loading ? 'spin' : ''}" aria-label="Muat ulang">
+        <small>${sub}</small></div>
+      <button id="refresh" class="icon ${spinning ? 'spin' : ''}" aria-label="Muat ulang">
         <svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.6-6.4M21 4v5h-5"/></svg></button>
     </header>
     ${view.error && view.rows.length ? `<p class="alert">${view.error}</p>` : ''}
@@ -319,8 +379,16 @@ document.addEventListener('click', async (e) => {
   const t = e.target.closest('button');
   if (e.target.id === 'overlay') return closeDetail();
   if (!t) return;
-  if (t.id === 'refresh') return refresh();
-  if (t.dataset.tab) { view.tab = t.dataset.tab; render(); window.scrollTo(0, 0); }
+  if (t.id === 'refresh') return view.tab === 'bot' ? loadBot() : refresh();
+  if (t.dataset.tab) {
+    view.tab = t.dataset.tab; render(); window.scrollTo(0, 0);
+    if (view.tab === 'bot' && (!view.botUpdated || Date.now() - view.botUpdated > 60000)) loadBot();
+  }
+  if (t.dataset.bot === 'edit') { view.botEdit = true; render(); }
+  if (t.id === 'bot-save') {
+    await saveBotLogin($('#bot-url').value, $('#bot-user').value, $('#bot-pass').value);
+    view.botEdit = false; view.bot = null; loadBot();
+  }
   if (t.dataset.filter) { view.filter = t.dataset.filter; render(); }
   if (t.dataset.mode) { state.settings.exitMode = t.dataset.mode; await save('settings'); render(); }
   if (t.dataset.coin) openDetail(t.dataset.coin);
