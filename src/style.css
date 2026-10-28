@@ -166,3 +166,4 @@ nav em { position: absolute; top: 0; left: calc(50% + 6px); font-style: normal; 
   .spark { display: none; }
   .grid4 { grid-template-columns: 1fr 1fr; }
 }
+.btn:disabled { opacity: .6; }
