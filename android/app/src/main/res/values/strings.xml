@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Sinyal Kripto</string>
+    <string name="title_activity_main">Sinyal Kripto</string>
+    <string name="package_name">id.rey.sinyalkripto</string>
+    <string name="custom_url_scheme">id.rey.sinyalkripto</string>
+</resources>
