@@ -9,6 +9,7 @@ const DEFAULTS = {
   positions: [],
   closed: [],
   notified: [],
+  bot: { url: '', user: '', pass: '' },
   settings: { stake: 1000000, notif: true, reminder: true, exitMode: 'balanced' },
 };
 

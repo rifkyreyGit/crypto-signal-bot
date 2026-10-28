@@ -121,7 +121,7 @@ main > .card + .card { margin-top: 10px; }
 .grid3 b { display: block; color: var(--text); font-size: 14px; }
 .settings { margin-top: 10px; display: flex; flex-direction: column; gap: 14px; }
 .settings label { display: flex; flex-direction: column; gap: 6px; color: var(--muted); font-size: 13px; }
-.settings input[type=number] { background: var(--card2); border: 1px solid var(--line); color: var(--text); border-radius: 10px; padding: 11px 12px; font: inherit; font-size: 16px; /* <16px membuat Safari iOS zoom */ }
+.settings input:not([type=checkbox]) { background: var(--card2); border: 1px solid var(--line); color: var(--text); border-radius: 10px; padding: 11px 12px; font: inherit; font-size: 16px; /* <16px membuat Safari iOS zoom */ }
 .settings .sw { flex-direction: row; justify-content: space-between; align-items: center; color: var(--text); font-size: 14.5px; }
 .sw input { appearance: none; width: 46px; height: 28px; border-radius: 999px; background: var(--line); position: relative; transition: .2s; }
 .sw input::after { content: ''; position: absolute; top: 3px; left: 3px; width: 22px; height: 22px; border-radius: 50%; background: #fff; transition: .2s; }
@@ -130,7 +130,7 @@ main > .card + .card { margin-top: 10px; }
 .disclaimer { color: var(--muted); font-size: 12px; text-align: center; margin: 18px 8px; }
 
 nav {
-  position: fixed; bottom: 0; left: 0; right: 0; z-index: 6; display: grid; grid-template-columns: repeat(4, 1fr);
+  position: fixed; bottom: 0; left: 0; right: 0; z-index: 6; display: grid; grid-template-columns: repeat(5, 1fr);
   background: color-mix(in srgb, var(--card) 94%, transparent); backdrop-filter: blur(12px);
   border-top: 1px solid var(--line); padding: 8px 4px calc(8px + env(safe-area-inset-bottom));
 }
