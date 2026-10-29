@@ -43,7 +43,12 @@ export async function fetchBot() {
     state: config.state,
     strategy: config.strategy,
     maxOpen: config.max_open_trades,
-    total: balance.total,
+    stake: config.stake_currency,
+    exchange: config.exchange,
+    // balance.total freqtrade kadang tidak menghitung nilai koin yang dipegang (harga tidak terbaca),
+    // jadi saldo = kas IDR + nilai posisi terbuka di harga sekarang
+    total: (balance.currencies.find((c) => c.currency === balance.stake)?.balance ?? 0)
+      + open.reduce((s, t) => s + t.amount * t.current_rate, 0),
     start: balance.starting_capital,
     profit: profit.profit_all_coin,
     closedProfit: profit.profit_closed_coin,
