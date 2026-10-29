@@ -36,10 +36,17 @@ class BreakoutTren(IStrategy):
 
     BE_ATR = 2.0                      # mode Seimbang
     STOP_ATR = 3.0
-    COST = 0.008                      # fee 0,3% x2 + slippage
+    COST = 0.008                      # biaya pulang-pergi untuk kunci impas; Binance: config "breakout_cost": 0.003
     BE_LOCK = 0.002
     MAX_STOP = 0.15                   # stop awal paling jauh -15% (uji: profit sama, drawdown lebih kecil); None = murni 3 ATR
-    BTC = "BTC/IDR"
+
+    @property
+    def BTC(self) -> str:
+        """Pair BTC untuk filter pasar, mengikuti mata uang bursa (BTC/IDR di Indodax, BTC/USDT di Binance)."""
+        return f"BTC/{self.config['stake_currency']}"
+
+    def bot_start(self, **kwargs) -> None:
+        self.COST = self.config.get("breakout_cost", self.COST)
 
     def informative_pairs(self):
         return [(self.BTC, self.timeframe)]
