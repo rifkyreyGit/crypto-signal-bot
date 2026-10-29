@@ -36,6 +36,14 @@ const date = (t) => new Date(t * 1000).toLocaleDateString('id-ID', { day: 'numer
 const cls = (v) => (v >= 0 ? 'up' : 'down');
 // Uang di tab Bot/Riwayat mengikuti mata uang bot (IDR di Indodax, USDT di Binance)
 const money = (v) => (view.bot && view.bot.stake !== 'USDT' ? rp(v) : usd(v));
+// Logo koin disimpan di app (public/logos, diambil dari Binance; CDN Binance menolak hotlink).
+// Koin tanpa logo: gambar gagal dimuat dan huruf awal di belakangnya yang tampil.
+const coinOf = (pair) => String(pair).split('/')[0].toUpperCase().replace(/[^A-Z0-9]/g, '');
+function logo(coin, kind = '') {
+  const c = coinOf(coin);
+  return `<div class="avatar ${kind ? 'a-' + kind : ''}"><span>${c.slice(0, 1)}</span>`
+    + `<img src="/logos/${c}.png" alt="" loading="lazy" onerror="this.remove()"></div>`;
+}
 const mode = () => EXIT_MODES[state.settings.exitMode] ?? EXIT_MODES.balanced;
 
 // ---------- data ----------
@@ -124,10 +132,10 @@ const dots = (n) => `<span class="dots">${[0, 1, 2, 3].map((i) => `<i class="${i
 const badge = (st) => `<span class="badge ${st.kind}">${st.label}</span>`;
 
 function coinCard(r) {
-  if (r.error) return `<div class="card coin muted"><div class="avatar">${r.coin[0]}</div><div class="grow"><b>${r.coin}</b><small>Gagal memuat</small></div></div>`;
+  if (r.error) return `<div class="card coin muted">${logo(r.coin)}<div class="grow"><b>${r.coin}</b><small>Gagal memuat</small></div></div>`;
   const t = view.tick[r.coin], chg = t ? t.last / t.prev - 1 : NaN;
   return `<button class="card coin" data-coin="${r.coin}">
-    <div class="avatar a-${r.st.kind}">${r.coin.slice(0, 1)}</div>
+    ${logo(r.coin, r.st.kind)}
     <div class="grow"><b>${r.coin}<span class="pair">/USDT</span></b>
       <small>${usd(t?.last ?? r.st.last.close)} <span class="${cls(chg)}">${pct(chg)}</span></small></div>
     ${spark(r.x, r.st.kind)}
@@ -193,7 +201,7 @@ function botHistory() {
       <div><small>Total P/L</small><b class="${cls(pnl)}">${money(pnl)}</b><small>${b.stake === 'USDT' ? idr(pnl) : ''}</small></div>
     </div>
     <div class="list" style="margin-top:8px">${b.closed.map((t) => `<div class="card trade">
-      <div class="grow"><b>${esc(t.pair)}</b><small>${ago(t.opened)} → ${ago(t.closedAt)} · ${esc(EXIT_TEXT[t.why] ?? t.why)}</small></div>
+      ${logo(t.pair)}<div class="grow"><b>${esc(t.pair)}</b><small>${ago(t.opened)} → ${ago(t.closedAt)} · ${esc(EXIT_TEXT[t.why] ?? t.why)}</small></div>
       <div class="right"><b class="${cls(t.ret)}">${pct(t.ret, 2)}</b><small>${money(t.pnl)}</small></div></div>`).join('') || '<p class="empty">Bot belum menutup posisi.</p>'}</div>`;
 }
 
@@ -252,7 +260,7 @@ async function openDetail(coin) {
   const { st } = r, t = view.tick[coin], held = state.positions.some((p) => p.coin === coin);
   const sheet = $('#sheet');
   sheet.innerHTML = `<div class="sheet-bar"></div>
-    <div class="row"><h2>${coin}<span class="pair">/USDT</span></h2>${badge(st)}</div>
+    <div class="row"><div class="title-coin">${logo(coin)}<h2>${coin}<span class="pair">/USDT</span></h2></div>${badge(st)}</div>
     <div class="price">${money(t?.last ?? st.last.close)}</div>
     <div id="chart"></div>
     <ul class="checks">${st.checks.map((c) => `<li class="${c.ok ? 'ok' : 'no'}">${c.text}</li>`).join('')}</ul>
@@ -367,7 +375,7 @@ function botView() {
     </div>
     <h3>Posisi terbuka</h3>
     <div class="list">${b.open.map((t) => `<div class="card pos">
-      <div class="row"><b>${esc(t.pair)}</b><span class="${cls(t.ret)}">${pct(t.ret, 2)} · ${money(t.pnl)} <small style="display:inline">${b.stake === 'USDT' ? idr(t.pnl) : ''}</small></span></div>
+      <div class="row"><div class="title-coin">${logo(t.pair)}<b>${esc(t.pair)}</b></div><span class="${cls(t.ret)}">${pct(t.ret, 2)} · ${money(t.pnl)} <small style="display:inline">${b.stake === 'USDT' ? idr(t.pnl) : ''}</small></span></div>
       <div class="grid2" style="margin-top:10px">
         <span>Masuk<b>${money(t.entry)}</b></span><span>Sekarang<b>${money(t.now)}</b></span>
         <span>Stop${t.stop >= t.entry ? ' impas ✓' : ''}<b>${money(t.stop)}</b></span><span>Modal<b>${money(t.stake)}</b></span>
@@ -375,7 +383,7 @@ function botView() {
       <button class="btn danger" data-sell="${t.id}" ${view.selling === t.id ? 'disabled' : ''}>${view.selling === t.id ? 'Menjual…' : `Jual sekarang di ±${money(t.now)}`}</button></div>`).join('') || '<p class="empty">Belum ada posisi. Bot menunggu sinyal breakout.</p>'}</div>
     <h3>Transaksi selesai (${n})</h3>
     <div class="list">${b.closed.slice(0, 20).map((t) => `<div class="card trade">
-      <div class="grow"><b>${esc(t.pair)}</b><small>${ago(t.opened)} → ${ago(t.closedAt)} · ${esc(EXIT_TEXT[t.why] ?? t.why)}</small></div>
+      ${logo(t.pair)}<div class="grow"><b>${esc(t.pair)}</b><small>${ago(t.opened)} → ${ago(t.closedAt)} · ${esc(EXIT_TEXT[t.why] ?? t.why)}</small></div>
       <div class="right"><b class="${cls(t.ret)}">${pct(t.ret, 2)}</b><small>${money(t.pnl)}</small></div></div>`).join('') || '<p class="empty">Belum ada.</p>'}</div>
     <button class="btn ghost" data-bot="edit">Ubah koneksi bot</button>`;
 }

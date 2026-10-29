@@ -238,3 +238,14 @@ nav em { position: absolute; top: -2px; left: calc(50% + 8px); font-style: norma
   .grid4 { grid-template-columns: 1fr 1fr; }
   h1 { font-size: 30px; }
 }
+
+/* Logo koin: gambar menutupi huruf awal; status tampil sebagai cincin warna */
+.avatar { position: relative; overflow: hidden; }
+.avatar img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; background: var(--card); border-radius: 50%; }
+.avatar.a-buy, .avatar.a-watch, .avatar.a-avoid { overflow: visible; }
+.avatar.a-buy img, .avatar.a-watch img, .avatar.a-avoid img { box-shadow: 0 0 0 2px var(--card), 0 0 0 4px var(--ring); }
+.a-buy { --ring: var(--up); } .a-watch { --ring: var(--warn); } .a-avoid { --ring: var(--down); }
+.title-coin { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.title-coin .avatar { width: 32px; height: 32px; font-size: 14px; }
+.row > .title-coin b { font-size: 17px; }
+.trade .avatar { width: 32px; height: 32px; font-size: 14px; }
