@@ -1,7 +1,7 @@
 // Cloudflare Pages Function: proxy ke API publik Indodax untuk versi web (iPhone).
 // Endpoint candle Indodax tidak mengirim header CORS, jadi browser tidak bisa memanggilnya langsung.
 // Hanya dua endpoint baca-saja yang diizinkan supaya proxy ini tidak bisa dipakai untuk hal lain.
-const ALLOWED = { '/tradingview/history_v2': 300, '/api/summaries': 30 };  // path -> detik cache
+const ALLOWED = { '/tradingview/history_v2': 300, '/api/summaries': 30, '/api/ticker/usdtidr': 60 };  // path -> detik cache
 
 export async function onRequestGet({ request }) {
   const url = new URL(request.url);

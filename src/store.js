@@ -1,9 +1,10 @@
 // Penyimpanan lokal di HP (posisi paper trading, riwayat, pengaturan). Tidak ada server.
 import { Preferences } from '@capacitor/preferences';
 
-export const DEFAULT_COINS = ['BTC', 'ETH', 'SOL', 'XRP', 'BNB', 'DOGE', 'ADA', 'SUI', 'TRX', 'NEAR',
-  'PEPE', 'SHIB', 'HBAR', 'QNT', 'WLD', 'ENA', 'ONDO', 'STRK', 'PENGU', 'HYPE', 'PUFFER', 'FARTCOIN',
-  'HAEDAL', 'PIPPIN', 'BR', 'ASTER', 'MYX', 'BEAT', 'SKYAI'];
+// Sama dengan daftar bot Binance (29 koin USDT volume terbesar, tanpa stablecoin dan token saham)
+export const DEFAULT_COINS = ['BTC', 'ETH', 'SOL', 'ZEC', 'BNB', 'XRP', 'PEPE', 'NEAR', 'ENA', 'SUI', 'WLD',
+  'UNI', 'TRX', 'DOGE', 'LTC', 'ADA', 'INIT', 'LINK', 'HYPE', 'PUMP', 'AVAX', 'AAVE', 'ARB', 'QNT', 'AI',
+  'FET', 'TAO', 'HAEDAL', 'BCH'];
 
 const DEFAULTS = {
   coins: DEFAULT_COINS,
@@ -11,7 +12,7 @@ const DEFAULTS = {
   closed: [],
   notified: [],
   bot: { url: '', user: '', pass: '' },
-  settings: { stake: 1000000, notif: true, reminder: true, exitMode: 'balanced' },
+  settings: { stakeUsd: 100, notif: true, reminder: true, exitMode: 'balanced' },
 };
 
 export const state = structuredClone(DEFAULTS);
@@ -31,7 +32,7 @@ export async function save(...keys) {
 }
 
 export function openPosition({ coin, price, stop, atr, beAtr }) {
-  const stake = state.settings.stake;
+  const stake = state.settings.stakeUsd;
   state.positions.push({ id: Date.now(), coin, entry: price, stake, qty: stake / price, stop, atr, beAtr, openedAt: Date.now() });
   return save('positions');
 }
@@ -40,7 +41,7 @@ export function closePosition(id, price, why) {
   const i = state.positions.findIndex((p) => p.id === id);
   if (i < 0) return;
   const [p] = state.positions.splice(i, 1);
-  const ret = price / p.entry - 1 - 0.008;
+  const ret = price / p.entry - 1 - 0.003;
   state.closed.unshift({ ...p, exit: price, closedAt: Date.now(), why, ret, pnl: p.stake * ret });
   return save('positions', 'closed');
 }
