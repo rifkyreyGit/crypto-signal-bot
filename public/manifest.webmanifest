@@ -1,11 +1,11 @@
 {
   "name": "Sinyal Kripto",
   "short_name": "Sinyal Kripto",
-  "description": "Sinyal breakout crypto Indodax (paper trading)",
+  "description": "Sinyal breakout crypto Binance dan pemantau bot",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#0b0f14",
-  "theme_color": "#0b0f14",
+  "background_color": "#f2f2f7",
+  "theme_color": "#f2f2f7",
   "lang": "id",
   "icons": [
     { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
