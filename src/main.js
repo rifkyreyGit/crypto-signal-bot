@@ -2,7 +2,7 @@ import './style.css';
 import { createChart } from 'lightweight-charts';
 import { Capacitor } from '@capacitor/core';
 import { App as CapApp } from '@capacitor/app';
-import { candles, tickers, pool } from './api.js';
+import { candles, tickers, pool, usdtIdr } from './api.js';
 import { PARAMS, EXIT_MODES, btcRegime, breakevenStop, indicators, status, backtest, stats } from './strategy.js';
 import { state, load, save, openPosition, closePosition } from './store.js';
 import { notify, setDailyReminder, ensurePermission } from './notify.js';
@@ -18,16 +18,24 @@ export function rp(v) {
   const a = Math.abs(v), d = a >= 1000 || a === 0 ? 0 : a >= 1 ? 2 : a >= 0.01 ? 4 : 6;
   return 'Rp' + nf(d).format(v);
 }
+// Harga dan uang di app dalam USDT (data Binance)
+export function usd(v) {
+  if (!Number.isFinite(v)) return '-';
+  const a = Math.abs(v), d = a >= 100 ? 2 : a >= 1 ? 3 : a >= 0.01 ? 5 : a === 0 ? 2 : 8;
+  return (v < 0 ? '-$' : '$') + nf(d).format(a);
+}
+// Perkiraan Rupiah dari jumlah USDT (kurs Indodax), mis. "≈ Rp1,6 jt"
+function idr(v) {
+  if (!Number.isFinite(v) || !view.usdtIdr) return '';
+  const r = v * view.usdtIdr, a = Math.abs(r), sign = r < 0 ? '-' : '';
+  const t = a >= 1e9 ? nf(2).format(a / 1e9) + ' M' : a >= 1e6 ? nf(2).format(a / 1e6) + ' jt' : a >= 1e3 ? nf(0).format(a / 1e3) + ' rb' : nf(0).format(a);
+  return `≈ ${sign}Rp${t}`;
+}
 const pct = (v, d = 1) => Number.isFinite(v) ? (v >= 0 ? '+' : '') + nf(d).format(v * 100) + '%' : '-';
 const date = (t) => new Date(t * 1000).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: '2-digit' });
 const cls = (v) => (v >= 0 ? 'up' : 'down');
 // Uang di tab Bot/Riwayat mengikuti mata uang bot (IDR di Indodax, USDT di Binance)
-function money(v) {
-  if (view.bot?.stake !== 'USDT') return rp(v);
-  if (!Number.isFinite(v)) return '-';
-  const a = Math.abs(v), d = a >= 100 ? 2 : a >= 1 ? 3 : a >= 0.01 ? 5 : 8;
-  return (v < 0 ? '-$' : '$') + nf(d).format(a);
-}
+const money = (v) => (view.bot && view.bot.stake !== 'USDT' ? rp(v) : usd(v));
 const mode = () => EXIT_MODES[state.settings.exitMode] ?? EXIT_MODES.balanced;
 
 // ---------- data ----------
@@ -35,7 +43,8 @@ async function refresh() {
   if (view.loading) return;
   view.loading = true; view.error = null; render();
   try {
-    const [tick, btc] = await Promise.all([tickers(), candles('BTC')]);
+    const [tick, btc, kurs] = await Promise.all([tickers(state.coins), candles('BTC'), usdtIdr()]);
+    if (kurs) view.usdtIdr = kurs;
     const regime = btcRegime(btc);
     const rows = await pool(state.coins, 4, async (coin) => {
       const c = coin === 'BTC' ? btc : await candles(coin);
@@ -48,7 +57,7 @@ async function refresh() {
     view.updated = new Date();
     await checkAlerts();
   } catch (e) {
-    view.error = 'Gagal mengambil data dari Indodax. Cek koneksi internet lalu coba lagi.';
+    view.error = 'Gagal mengambil data dari Binance. Cek koneksi internet lalu coba lagi.';
   } finally {
     view.loading = false;
     render();
@@ -87,16 +96,16 @@ async function checkAlerts() {
   if (moved.length) await save('positions');
   if (!state.settings.notif) return;
   const seen = new Set(state.notified), out = [];
-  for (const p of moved) out.push({ title: `${p.coin}: stop pindah ke impas`, body: `Stop baru ${rp(p.stop)}. Posisi ini tidak bisa rugi lagi (kecuali gap harga).` });
+  for (const p of moved) out.push({ title: `${p.coin}: stop pindah ke impas`, body: `Stop baru ${usd(p.stop)}. Posisi ini tidak bisa rugi lagi (kecuali gap harga).` });
   for (const r of view.rows) {
     if (r.st?.kind !== 'buy') continue;
     const key = `buy:${r.coin}:${r.st.last.time}`;
-    if (!seen.has(key)) { seen.add(key); out.push({ title: `BELI ${r.coin}/IDR`, body: `Breakout high 20 hari. Stop saran ${rp(r.st.stop)}.` }); }
+    if (!seen.has(key)) { seen.add(key); out.push({ title: `BELI ${r.coin}/USDT`, body: `Breakout high 20 hari. Stop saran ${usd(r.st.stop)}.` }); }
   }
   for (const p of state.positions) {
     const why = exitReason(p);
     const key = `exit:${p.id}`;
-    if (why && !seen.has(key)) { seen.add(key); out.push({ title: `JUAL ${p.coin}/IDR`, body: `${why}. Buka app untuk menutup posisi.` }); }
+    if (why && !seen.has(key)) { seen.add(key); out.push({ title: `JUAL ${p.coin}/USDT`, body: `${why}. Buka app untuk menutup posisi.` }); }
   }
   state.notified = [...seen].slice(-300);
   await save('notified');
@@ -119,8 +128,8 @@ function coinCard(r) {
   const t = view.tick[r.coin], chg = t ? t.last / t.prev - 1 : NaN;
   return `<button class="card coin" data-coin="${r.coin}">
     <div class="avatar a-${r.st.kind}">${r.coin.slice(0, 1)}</div>
-    <div class="grow"><b>${r.coin}<span class="pair">/IDR</span></b>
-      <small>${rp(t?.last ?? r.st.last.close)} <span class="${cls(chg)}">${pct(chg)}</span></small></div>
+    <div class="grow"><b>${r.coin}<span class="pair">/USDT</span></b>
+      <small>${usd(t?.last ?? r.st.last.close)} <span class="${cls(chg)}">${pct(chg)}</span></small></div>
     ${spark(r.x, r.st.kind)}
     <div class="right">${badge(r.st)}${dots(r.st.score)}</div>
   </button>`;
@@ -159,15 +168,15 @@ function positionsView() {
   return `<div class="list">${state.positions.map((p) => {
     const live = view.tick[p.coin]?.last, ret = live / p.entry - 1 - PARAMS.cost, why = exitReason(p);
     return `<div class="card pos">
-      <div class="row"><b>${p.coin}/IDR</b>${why ? '<span class="badge avoid">JUAL</span>' : '<span class="badge hold">TAHAN</span>'}</div>
-      <div class="big ${cls(ret)}">${pct(ret, 2)} <small>${rp(p.stake * ret)}</small></div>
+      <div class="row"><b>${p.coin}/USDT</b>${why ? '<span class="badge avoid">JUAL</span>' : '<span class="badge hold">TAHAN</span>'}</div>
+      <div class="big ${cls(ret)}">${pct(ret, 2)} <small>${usd(p.stake * ret)}</small></div>
       <div class="grid2">
-        <span>Masuk<b>${rp(p.entry)}</b></span><span>Sekarang<b>${rp(live)}</b></span>
-        <span>${p.beHit ? 'Stop impas ✓' : 'Stop'}<b>${rp(p.stop)}</b></span><span>Modal<b>${rp(p.stake)}</b></span>
+        <span>Masuk<b>${usd(p.entry)}</b></span><span>Sekarang<b>${usd(live)}</b></span>
+        <span>${p.beHit ? 'Stop impas ✓' : 'Stop'}<b>${usd(p.stop)}</b></span><span>Modal<b>${usd(p.stake)}</b></span>
       </div>
       ${why ? `<p class="alert">${why}</p>` : `<p class="hint">Tahan selama close harian di atas MA20 dan harga di atas stop.${
-        p.beAtr && !p.beHit ? ` Stop pindah ke impas jika harga mencapai ${rp(p.entry + p.beAtr * p.atr)}.` : ''}</p>`}
-      <button class="btn ${why ? 'danger' : 'ghost'}" data-close="${p.id}">Tutup posisi di ${rp(live)}</button>
+        p.beAtr && !p.beHit ? ` Stop pindah ke impas jika harga mencapai ${usd(p.entry + p.beAtr * p.atr)}.` : ''}</p>`}
+      <button class="btn ${why ? 'danger' : 'ghost'}" data-close="${p.id}">Tutup posisi di ${usd(live)}</button>
     </div>`;
   }).join('')}</div>`;
 }
@@ -181,7 +190,7 @@ function botHistory() {
     <div class="card summary">
       <div><small>Win rate bot</small><b>${n ? nf(0).format((b.wins / n) * 100) + '%' : '-'}</b></div>
       <div><small>Transaksi</small><b>${n}</b></div>
-      <div><small>Total P/L</small><b class="${cls(pnl)}">${money(pnl)}</b></div>
+      <div><small>Total P/L</small><b class="${cls(pnl)}">${money(pnl)}</b><small>${b.stake === 'USDT' ? idr(pnl) : ''}</small></div>
     </div>
     <div class="list" style="margin-top:8px">${b.closed.map((t) => `<div class="card trade">
       <div class="grow"><b>${esc(t.pair)}</b><small>${ago(t.opened)} → ${ago(t.closedAt)} · ${esc(EXIT_TEXT[t.why] ?? t.why)}</small></div>
@@ -212,7 +221,7 @@ function infoView() {
         <li><b>JUAL</b> jika close harian turun di bawah MA20.</li>
         <li><b>Stop loss</b> di harga masuk − ${PARAMS.stopAtr}× ATR14, lalu naik ke impas sesuai mode exit.</li>
       </ol>
-      <p class="hint">Bot dan app memantau 29 koin Indodax dengan volume terbesar dan spread ≤ 0,5% (dipilih 28 Okt 2026). Angka di bawah dari uji awal pada 18 koin (biaya 0,8% per transaksi pulang-pergi). Parameter dipilih di data 2020–2022, lalu diuji di data 2023–Okt 2026 yang tidak dipakai untuk memilih.</p>
+      <p class="hint">Bot dan app memantau 29 koin <b>Binance (USDT)</b> dengan volume terbesar. Uji di Binance (data 2023–Okt 2026, 18 koin yang sama): +397%, win rate 58%, profit factor 2,39. Parameter dipilih di data 2020–2022 yang tidak dipakai untuk menguji. Angka mode exit di bawah dari uji awal di Indodax (biaya 0,8%).</p>
     </div>
     <div class="card">
       <h3>Mode exit</h3>
@@ -227,13 +236,13 @@ function infoView() {
     </div>
     <div class="card settings">
       <h3>Pengaturan</h3>
-      <label>Modal per posisi (paper)<input type="number" id="stake" inputmode="numeric" value="${s.stake}" min="10000" step="10000"></label>
+      <label>Modal per posisi (paper, USDT)<input type="number" id="stake" inputmode="decimal" value="${s.stakeUsd}" min="5" step="5"></label>
       ${Capacitor.isNativePlatform() ? `
       <label class="sw"><span>Notifikasi sinyal & jual</span><input type="checkbox" id="notif" ${s.notif ? 'checked' : ''}></label>
       <label class="sw"><span>Pengingat harian 07:05</span><input type="checkbox" id="reminder" ${s.reminder ? 'checked' : ''}></label>`
       : '<p class="hint">Versi web tidak bisa mengirim notifikasi. Buka app setelah 07:00 WIB (candle harian tutup) untuk cek sinyal baru.</p>'}
     </div>
-    <p class="disclaimer">Paper trading saja: app ini tidak terhubung ke akun Indodax dan tidak mengeksekusi order. Bukan saran investasi.</p>`;
+    <p class="disclaimer">Paper trading saja: catatan manual di app tidak mengeksekusi order apa pun. Bukan saran investasi.</p>`;
 }
 
 // ---------- detail ----------
@@ -243,7 +252,7 @@ async function openDetail(coin) {
   const { st } = r, t = view.tick[coin], held = state.positions.some((p) => p.coin === coin);
   const sheet = $('#sheet');
   sheet.innerHTML = `<div class="sheet-bar"></div>
-    <div class="row"><h2>${coin}<span class="pair">/IDR</span></h2>${badge(st)}</div>
+    <div class="row"><h2>${coin}<span class="pair">/USDT</span></h2>${badge(st)}</div>
     <div class="price">${money(t?.last ?? st.last.close)}</div>
     <div id="chart"></div>
     <ul class="checks">${st.checks.map((c) => `<li class="${c.ok ? 'ok' : 'no'}">${c.text}</li>`).join('')}</ul>
@@ -254,7 +263,7 @@ async function openDetail(coin) {
     <h3>Uji strategi di ${coin} sejak 2019 · mode ${mode().label}</h3>
     <div id="bt" class="card flat"><div class="skeleton small"></div></div>
     ${held ? '<p class="hint center">Kamu sudah memegang posisi koin ini.</p>'
-      : `<button class="btn ${st.kind === 'buy' ? 'primary' : 'ghost'}" id="buy">${st.kind === 'buy' ? 'Catat beli' : 'Catat beli (tanpa sinyal)'} · ${money(state.settings.stake)}</button>`}`;
+      : `<button class="btn ${st.kind === 'buy' ? 'primary' : 'ghost'}" id="buy">${st.kind === 'buy' ? 'Catat beli' : 'Catat beli (tanpa sinyal)'} · ${money(state.settings.stakeUsd)}</button>`}`;
   $('#overlay').classList.add('show');
   sheet.scrollTop = 0;
   const chart = drawChart($('#chart'), r.x.slice(-150));
@@ -352,13 +361,13 @@ function botView() {
     <div class="banner ${b.dryRun ? 'good' : 'bad'}"><b>${b.dryRun ? 'DRY-RUN · saldo simulasi' : 'LIVE · uang sungguhan'}</b>
       <span>${esc(b.exchange ?? '')} · ${esc(b.strategy)} · status ${esc(b.state)} · ${b.open.length}/${b.maxOpen} posisi</span></div>
     <div class="card summary">
-      <div><small>Saldo</small><b>${money(b.total)}</b></div>
-      <div><small>Profit</small><b class="${cls(ret)}">${pct(ret)}</b></div>
+      <div><small>Saldo</small><b>${money(b.total)}</b><small>${b.stake === 'USDT' ? idr(b.total) : ''}</small></div>
+      <div><small>Profit</small><b class="${cls(ret)}">${pct(ret)}</b><small>${money(b.profit)}${b.stake === 'USDT' && idr(b.profit) ? '<br>' + idr(b.profit) : ''}</small></div>
       <div><small>Win rate</small><b>${n ? nf(0).format((b.wins / n) * 100) + '%' : '-'}</b></div>
     </div>
     <h3>Posisi terbuka</h3>
     <div class="list">${b.open.map((t) => `<div class="card pos">
-      <div class="row"><b>${esc(t.pair)}</b><span class="${cls(t.ret)}">${pct(t.ret, 2)} · ${money(t.pnl)}</span></div>
+      <div class="row"><b>${esc(t.pair)}</b><span class="${cls(t.ret)}">${pct(t.ret, 2)} · ${money(t.pnl)} <small style="display:inline">${b.stake === 'USDT' ? idr(t.pnl) : ''}</small></span></div>
       <div class="grid2" style="margin-top:10px">
         <span>Masuk<b>${money(t.entry)}</b></span><span>Sekarang<b>${money(t.now)}</b></span>
         <span>Stop${t.stop >= t.entry ? ' impas ✓' : ''}<b>${money(t.stop)}</b></span><span>Modal<b>${money(t.stake)}</b></span>
@@ -385,7 +394,7 @@ function render() {
   const last = view.rows.find((r) => r.x)?.x.at(-1);
   const sub = view.tab === 'bot'
     ? (view.botLoading ? 'Menghubungi bot…' : view.botUpdated ? `Data bot · cek ${view.botUpdated.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}` : '')
-    : view.loading ? 'Memuat data Indodax…' : view.updated ? `Candle ${date(last.time)} · cek ${view.updated.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}` : '';
+    : view.loading ? 'Memuat data Binance…' : view.updated ? `Candle ${date(last.time)} · cek ${view.updated.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}` : '';
   const spinning = view.tab === 'bot' ? view.botLoading : view.loading;
   $('#app').innerHTML = `
     <header>
@@ -432,7 +441,7 @@ document.addEventListener('click', async (e) => {
     const p = state.positions.find((x) => x.id === +t.dataset.close);
     const price = view.tick[p.coin]?.last;
     if (!Number.isFinite(price)) return;
-    if (!confirm(`Tutup ${p.coin} di ${rp(price)}?`)) return;
+    if (!confirm(`Tutup ${p.coin} di ${usd(price)}?`)) return;
     await closePosition(p.id, price, exitReason(p) ?? 'Ditutup manual');
     render();
   }
@@ -440,7 +449,7 @@ document.addEventListener('click', async (e) => {
 
 document.addEventListener('change', async (e) => {
   const s = state.settings;
-  if (e.target.id === 'stake') s.stake = Math.max(10000, +e.target.value || s.stake);
+  if (e.target.id === 'stake') s.stakeUsd = Math.max(5, +e.target.value || s.stakeUsd);
   if (e.target.id === 'notif') { s.notif = e.target.checked; if (s.notif) await ensurePermission(); }
   if (e.target.id === 'reminder') { s.reminder = e.target.checked; await setDailyReminder(s.reminder); }
   await save('settings');

@@ -1,6 +1,9 @@
 // Cocokkan strategy.js dengan riset Python. Data: python scripts/export_parity.py <file.json>
 import { readFileSync } from 'node:fs';
-import { btcRegime, indicators, backtest, EXIT_MODES } from '../src/strategy.js';
+import { PARAMS, btcRegime, indicators, backtest, EXIT_MODES } from '../src/strategy.js';
+
+// Data paritas berasal dari riset Indodax (biaya 0,8%), bukan default Binance di app
+const P = { ...PARAMS, cost: 0.008 };
 
 const data = JSON.parse(readFileSync(process.argv[2] ?? 'parity.json', 'utf8'));
 const regime = btcRegime(data.BTC.candles);
@@ -8,7 +11,7 @@ let bad = 0, total = 0;
 for (const [coin, { candles, trades }] of Object.entries(data)) {
   const x = indicators(candles, regime);
   for (const [mode, { beAtr }] of Object.entries(EXIT_MODES)) {
-    const py = trades[mode], js = backtest(x, beAtr);
+    const py = trades[mode], js = backtest(x, beAtr, P);
     total += py.length;
     const same = js.length === py.length && js.every((t, i) => t.entryTime === py[i][0] && Math.abs(t.ret - py[i][1]) < 1e-9);
     if (!same) { bad++; console.log(`${coin} [${mode}]: JS ${js.length} vs Python ${py.length} transaksi`); }

@@ -8,7 +8,7 @@ export const PARAMS = {
   volRatioMin: 1.2,     // volume minimal 1,2x rata-rata 20 hari
   btcMa: 100,           // filter pasar: BTC di atas MA100
   stopAtr: 3,           // stop loss = harga masuk - 3x ATR14
-  cost: 0.008,          // fee 0,3% x2 + slippage 0,2% (pulang-pergi)
+  cost: 0.003,          // Binance: fee 0,1% x2 + slippage 0,1% (pulang-pergi)
   beLock: 0.002,        // stop impas dikunci di +0,2% bersih setelah biaya
 };
 

@@ -1,34 +1,49 @@
-// Data publik Indodax. Di HP, CapacitorHttp mem-bypass CORS; di browser dev lewat proxy Vite.
+// Data pasar publik Binance (pair USDT) dari data-api.binance.vision: tanpa akun, bisa diakses dari
+// jaringan Indonesia, dan mengizinkan CORS. Kurs USDT/IDR diambil dari Indodax (untuk perkiraan Rupiah).
 import { Capacitor } from '@capacitor/core';
 
-const BASE = Capacitor.isNativePlatform() ? 'https://indodax.com' : '/indodax';
+const BINANCE = 'https://data-api.binance.vision';
+const INDODAX = Capacitor.isNativePlatform() ? 'https://indodax.com' : '/indodax';
 const DAY = 86400;
 
-async function getJson(path) {
-  const r = await fetch(BASE + path);
-  if (!r.ok) throw new Error(`Indodax ${r.status}`);
+async function getJson(url) {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
   return r.json();
 }
 
-// Candle harian yang sudah tutup saja (candle hari ini dibuang).
+const toCandle = (k) => ({ time: k[0] / 1000, open: +k[1], high: +k[2], low: +k[3], close: +k[4], volume: +k[5], closeTime: k[6] });
+
+// Candle harian yang sudah tutup saja (candle hari ini dibuang). days = 0 berarti histori lengkap sejak 2019.
 export async function candles(coin, days = 420) {
-  const now = Math.floor(Date.now() / 1000);
-  const from = days ? now - days * DAY : 1546300800;
-  const raw = await getJson(`/tradingview/history_v2?symbol=${coin}IDR&tf=1D&from=${from}&to=${now}`);
-  return raw
-    .filter((k) => k.Time + DAY <= now)
-    .map((k) => ({ time: k.Time, open: +k.Open, high: +k.High, low: +k.Low, close: +k.Close, volume: +k.Volume }));
+  const now = Date.now();
+  let start = days ? now - days * DAY * 1000 : Date.UTC(2019, 0, 1);
+  const out = [];
+  for (;;) {
+    const raw = await getJson(`${BINANCE}/api/v3/klines?symbol=${coin}USDT&interval=1d&startTime=${start}&limit=1000`);
+    out.push(...raw.map(toCandle));
+    if (raw.length < 1000) break;
+    start = raw.at(-1)[0] + DAY * 1000;
+  }
+  return out.filter((k) => k.closeTime < now).map(({ closeTime, ...k }) => k);
 }
 
-export async function tickers() {
-  const { tickers: t, prices_24h: p24 } = await getJson('/api/summaries');
+export async function tickers(coins) {
+  const symbols = encodeURIComponent(JSON.stringify(coins.map((c) => `${c}USDT`)));
+  const rows = await getJson(`${BINANCE}/api/v3/ticker/24hr?symbols=${symbols}`);
   const out = {};
-  for (const [pair, v] of Object.entries(t)) {
-    if (!pair.endsWith('_idr')) continue;
-    const prev = +(p24[pair.replace('_', '')] ?? v.last);
-    out[pair.slice(0, -4).toUpperCase()] = { last: +v.last, prev, volIdr: +v.vol_idr };
-  }
+  for (const t of rows) out[t.symbol.slice(0, -4)] = { last: +t.lastPrice, prev: +t.prevClosePrice || +t.openPrice, volUsd: +t.quoteVolume };
   return out;
+}
+
+// Kurs 1 USDT dalam Rupiah (harga terakhir di Indodax). Gagal = null, app tetap jalan tanpa perkiraan Rupiah.
+export async function usdtIdr() {
+  try {
+    const { ticker } = await getJson(`${INDODAX}/api/ticker/usdtidr`);
+    return +ticker.last || null;
+  } catch {
+    return null;
+  }
 }
 
 export async function pool(items, size, fn) {
