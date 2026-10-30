@@ -4,13 +4,19 @@ BELI  : close > high 20 hari sebelumnya, close > MA50, volume >= 1,2x rata-rata 
 JUAL  : close < MA20
 STOP  : masuk - 3x ATR14 (ATR hari sinyal), paling jauh -15%; naik ke impas (+0,2% bersih) setelah harga
         mencapai masuk + BE_ATR x ATR. BE_ATR: None = profit maksimal, 2 = seimbang, 1 = win rate tinggi.
+AI    : opsional (config "ai_veto"), Claude memeriksa berita sebelum beli dan boleh menolak. Lihat ai_veto.py.
 """
+import sys
 from datetime import datetime, timedelta
+from pathlib import Path
 
 from pandas import DataFrame
 
 from freqtrade.persistence import Trade
 from freqtrade.strategy import IStrategy, merge_informative_pair, stoploss_from_absolute
+
+sys.path.insert(0, str(Path(__file__).parent))
+import ai_veto  # noqa: E402
 
 
 def sma(s, n):
@@ -75,6 +81,24 @@ class BreakoutTren(IStrategy):
     def populate_exit_trend(self, df: DataFrame, metadata: dict) -> DataFrame:
         df.loc[df["close"] < df["ma20"], ["exit_long", "exit_tag"]] = (1, "close<ma20")
         return df
+
+    def confirm_trade_entry(self, pair: str, order_type: str, amount: float, rate: float, time_in_force: str,
+                            current_time: datetime, entry_tag: str | None, side: str, **kwargs) -> bool:
+        """AI veto. shadow=true: hanya dicatat, tetap beli (untuk membandingkan dengan/tanpa AI)."""
+        cfg = self.config.get("ai_veto") or {}
+        if not cfg.get("enabled") or self.config["runmode"].value not in ("dry_run", "live"):
+            return True
+        key = (pair, current_time.date())
+        if not hasattr(self, "_ai_cache"):
+            self._ai_cache = {}
+        if key not in self._ai_cache:  # satu panggilan per koin per hari
+            verdict = ai_veto.check(pair, cfg)
+            self._ai_cache[key] = verdict
+            ai_veto.log(str(Path(self.config["user_data_dir"]) / "ai_veto.jsonl"),
+                        {"time": current_time.isoformat(), "pair": pair, "rate": rate,
+                         "shadow": cfg.get("shadow", True), **verdict})
+        verdict = self._ai_cache[key]
+        return not (verdict["veto"] and not cfg.get("shadow", True))
 
     def _signal_atr(self, pair: str, trade: Trade):
         """ATR pada candle sinyal (candle harian terakhir yang tutup sebelum posisi dibuka)."""
