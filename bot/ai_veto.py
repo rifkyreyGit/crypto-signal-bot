@@ -1,4 +1,6 @@
-"""AI veto: sebelum bot membeli, Claude mencari berita terbaru tentang koin dan boleh MENOLAK.
+"""Veto sebelum beli. Dua sumber (config "ai_veto" -> "source"):
+- "binance" (gratis, default): tolak koin yang diumumkan akan di-delist atau diberi Monitoring Tag oleh Binance.
+- "claude": Claude mencari berita terbaru tentang koin dan boleh MENOLAK (butuh API key).
 
 AI tidak pernah menyuruh beli; sinyal tetap dari BreakoutTren. Kalau API gagal/timeout, transaksi
 tetap jalan (fail-open) supaya bot tidak macet. Setiap keputusan dicatat ke user_data/ai_veto.jsonl
@@ -27,6 +29,34 @@ atau harga yang "sudah naik banyak" bukan alasan menolak.
 
 Akhiri jawabanmu dengan SATU baris JSON saja, tanpa teks lain sesudahnya:
 {{"veto": true atau false, "reason": "alasan singkat dalam bahasa Indonesia, maks 30 kata"}}"""
+
+
+NOTICE_URL = "https://www.binance.com/bapi/composite/v1/public/cms/article/list/query"
+NOTICE_CATALOGS = (161, 49)  # Delisting, Latest Binance News
+SKIP = ("Futures", "Margin", "Alpha", "Notice of Removal", "Loans", "Convert")
+
+
+def check_binance(pair: str, cfg: dict) -> dict:
+    """Cari judul pengumuman Binance (30 hari) yang menyebut koin ini bersama delist / Monitoring Tag."""
+    import requests
+
+    coin, days = pair.split("/")[0].upper(), cfg.get("days", 30)
+    since = datetime.now(timezone.utc).timestamp() * 1000 - days * 86400000
+    word = re.compile(rf"(?<![A-Z0-9]){re.escape(coin)}(?![A-Z0-9])")
+    try:
+        for cat in NOTICE_CATALOGS:
+            res = requests.get(NOTICE_URL, timeout=20, params={
+                "type": 1, "pageNo": 1, "pageSize": 50, "catalogId": cat}).json()
+            for group in res["data"]["catalogs"]:
+                for a in group["articles"]:
+                    title = a["title"]
+                    if a["releaseDate"] < since or any(k in title for k in SKIP):
+                        continue
+                    if ("Delist" in title or "Monitoring Tag" in title) and word.search(title.upper()):
+                        return {"veto": True, "reason": f"Pengumuman Binance: {title}"[:300], "error": None}
+    except Exception as e:  # jaringan / format berubah: jangan hentikan bot
+        return {"veto": False, "reason": "", "error": f"{type(e).__name__}: {e}"[:300]}
+    return {"veto": False, "reason": "Tidak ada pengumuman delist / Monitoring Tag", "error": None}
 
 
 def check(pair: str, cfg: dict) -> dict:

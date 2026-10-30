@@ -108,10 +108,9 @@
   },
   "strategy": "BreakoutTren",
   "ai_veto": {
-    "enabled": false,
-    "shadow": true,
-    "model": "claude-opus-5-5",
-    "effort": "medium",
-    "max_searches": 5
+    "enabled": true,
+    "shadow": false,
+    "source": "binance",
+    "days": 30
   }
 }

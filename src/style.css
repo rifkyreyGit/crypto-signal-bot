@@ -216,7 +216,12 @@ nav em { position: absolute; top: -2px; left: calc(50% + 8px); font-style: norma
   max-width: 720px; margin: 0 auto;
 }
 #overlay.show #sheet { transform: none; }
-.sheet-bar { width: 36px; height: 5px; border-radius: 3px; background: var(--line); margin: 0 auto 14px; }
+.sheet-bar { width: 36px; height: 5px; border-radius: 3px; background: var(--line); margin: 0 auto 6px; }
+.back {
+  display: inline-flex; align-items: center; gap: 2px; margin: 0 0 8px -6px; padding: 6px 6px 6px 0;
+  background: none; border: 0; color: var(--accent); font: inherit; font-size: 17px; cursor: pointer;
+}
+.back svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
 .price { font-size: 34px; font-weight: 700; letter-spacing: -0.025em; margin: 4px 0 10px; font-variant-numeric: tabular-nums; }
 #chart { height: 240px; margin: 0 -6px 12px; background: var(--card); border-radius: var(--radius); padding: 6px 0; box-shadow: var(--shadow); }
 .checks { list-style: none; padding: 4px 16px; margin: 8px 0 12px; background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); }
