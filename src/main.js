@@ -260,6 +260,7 @@ async function openDetail(coin) {
   const { st } = r, t = view.tick[coin], held = state.positions.some((p) => p.coin === coin);
   const sheet = $('#sheet');
   sheet.innerHTML = `<div class="sheet-bar"></div>
+    <button class="back" id="back"><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg>Kembali</button>
     <div class="row"><div class="title-coin">${logo(coin)}<h2>${coin}<span class="pair">/USDT</span></h2></div>${badge(st)}</div>
     <div class="price">${money(t?.last ?? st.last.close)}</div>
     <div id="chart"></div>
@@ -273,6 +274,7 @@ async function openDetail(coin) {
     ${held ? '<p class="hint center">Kamu sudah memegang posisi koin ini.</p>'
       : `<button class="btn ${st.kind === 'buy' ? 'primary' : 'ghost'}" id="buy">${st.kind === 'buy' ? 'Catat beli' : 'Catat beli (tanpa sinyal)'} · ${money(state.settings.stakeUsd)}</button>`}`;
   $('#overlay').classList.add('show');
+  if (!history.state?.sheet) history.pushState({ sheet: 1 }, '');  // tombol/gesture kembali menutup detail
   sheet.scrollTop = 0;
   const chart = drawChart($('#chart'), r.x.slice(-150));
   $('#buy')?.addEventListener('click', async () => {
@@ -296,10 +298,15 @@ async function openDetail(coin) {
   }
 }
 
-function closeDetail() {
+function closeDetail(fromHistory = false) {
   $('#overlay').classList.remove('show');
   $('#chart')?._chart?.remove();
+  if (!fromHistory && history.state?.sheet) history.back();
 }
+
+window.addEventListener('popstate', () => {
+  if ($('#overlay').classList.contains('show')) closeDetail(true);
+});
 
 function drawChart(el, x) {
   const css = getComputedStyle(document.documentElement);
@@ -421,6 +428,7 @@ document.addEventListener('click', async (e) => {
   const t = e.target.closest('button');
   if (e.target.id === 'overlay') return closeDetail();
   if (!t) return;
+  if (t.id === 'back') return closeDetail();
   if (t.id === 'refresh') return view.tab === 'bot' || view.tab === 'history' ? loadBot() : refresh();
   if (t.dataset.tab) {
     view.tab = t.dataset.tab; render(); window.scrollTo(0, 0);

@@ -4,7 +4,8 @@ BELI  : close > high 20 hari sebelumnya, close > MA50, volume >= 1,2x rata-rata 
 JUAL  : close < MA20
 STOP  : masuk - 3x ATR14 (ATR hari sinyal), paling jauh -15%; naik ke impas (+0,2% bersih) setelah harga
         mencapai masuk + BE_ATR x ATR. BE_ATR: None = profit maksimal, 2 = seimbang, 1 = win rate tinggi.
-AI    : opsional (config "ai_veto"), Claude memeriksa berita sebelum beli dan boleh menolak. Lihat ai_veto.py.
+VETO  : opsional (config "ai_veto"): tolak koin yang diumumkan Binance akan di-delist / Monitoring Tag, atau
+        Claude memeriksa berita (source "claude"). Lihat ai_veto.py.
 """
 import sys
 from datetime import datetime, timedelta
@@ -92,7 +93,8 @@ class BreakoutTren(IStrategy):
         if not hasattr(self, "_ai_cache"):
             self._ai_cache = {}
         if key not in self._ai_cache:  # satu panggilan per koin per hari
-            verdict = ai_veto.check(pair, cfg)
+            check = ai_veto.check if cfg.get("source") == "claude" else ai_veto.check_binance
+            verdict = check(pair, cfg)
             self._ai_cache[key] = verdict
             ai_veto.log(str(Path(self.config["user_data_dir"]) / "ai_veto.jsonl"),
                         {"time": current_time.isoformat(), "pair": pair, "rate": rate,
