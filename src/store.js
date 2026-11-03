@@ -6,6 +6,11 @@ export const DEFAULT_COINS = ['BTC', 'ETH', 'SOL', 'ZEC', 'BNB', 'XRP', 'PEPE', 
   'UNI', 'TRX', 'DOGE', 'LTC', 'ADA', 'INIT', 'LINK', 'HYPE', 'PUMP', 'AVAX', 'AAVE', 'ARB', 'QNT', 'AI',
   'FET', 'TAO', 'HAEDAL', 'BCH'];
 
+// Sama dengan daftar bot Indodax (pair IDR)
+export const INDODAX_COINS = ['BTC', 'BEAT', 'PEPE', 'SOL', 'XRP', 'ETH', 'HYPE', 'FARTCOIN', 'HAEDAL', 'BR', 'QNT',
+  'PIPPIN', 'SUI', 'DOGE', 'ADA', 'BNB', 'ONDO', 'ASTER', 'SKYAI', 'PUFFER', 'ENA', 'NEAR', 'STRK', 'PENGU', 'MYX',
+  'HBAR', 'SHIB', 'WLD', 'TRX'];
+
 const DEFAULTS = {
   coins: DEFAULT_COINS,
   positions: [],
@@ -13,7 +18,7 @@ const DEFAULTS = {
   notified: [],
   bot: { url: '', user: '', pass: '' },  // lama (satu bot), dipindah ke bots saat load
   bots: [],
-  settings: { stakeUsd: 100, notif: true, reminder: true, exitMode: 'balanced' },
+  settings: { stakeUsd: 100, notif: true, reminder: true, exitMode: 'balanced', market: 'binance' },
 };
 
 export const state = structuredClone(DEFAULTS);

@@ -2,15 +2,24 @@ import './style.css';
 import { createChart } from 'lightweight-charts';
 import { Capacitor } from '@capacitor/core';
 import { App as CapApp } from '@capacitor/app';
-import { candles, tickers, pool, usdtIdr } from './api.js';
+import { candles, tickers, candlesIdx, tickersIdx, pool, usdtIdr } from './api.js';
 import { PARAMS, EXIT_MODES, btcRegime, breakevenStop, indicators, status, backtest, stats } from './strategy.js';
-import { state, load, save, openPosition, closePosition } from './store.js';
+import { state, load, save, openPosition, closePosition, INDODAX_COINS } from './store.js';
 import { notify, setDailyReminder, ensurePermission } from './notify.js';
 import { botConfigured, fetchBot, saveBotLogin, removeBot, sellNow } from './bot.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const view = { tab: 'signals', filter: 'all', rows: [], tick: {}, regime: null, updated: null, loading: false, error: null,
-  bots: {}, botErr: {}, botSel: 'all' };
+  bots: {}, botErr: {}, botSel: 'all',
+  idx: { rows: [], tick: {}, regime: null, updated: null, loading: false, error: null } };
+
+// Pasar di tab Sinyal: Binance (USDT, default, juga dipakai posisi manual & notifikasi) atau Indodax (IDR).
+// Data Binance ada langsung di view (rows, tick, ...), data Indodax di view.idx dengan bentuk yang sama.
+const isIdx = () => state.settings.market === 'indodax';
+const cur = () => (isIdx() ? view.idx : view);
+const quote = () => (isIdx() ? 'IDR' : 'USDT');
+const P_IDX = { ...PARAMS, cost: 0.008 };  // biaya Indodax pulang-pergi, sama dengan bot Indodax
+const params = () => (isIdx() ? P_IDX : PARAMS);
 
 // ---------- format ----------
 const nf = (d) => new Intl.NumberFormat('id-ID', { maximumFractionDigits: d, minimumFractionDigits: d });
@@ -40,6 +49,8 @@ function rpShort(r) {
 const pct = (v, d = 1) => Number.isFinite(v) ? (v >= 0 ? '+' : '') + nf(d).format(v * 100) + '%' : '-';
 const date = (t) => new Date(t * 1000).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: '2-digit' });
 const cls = (v) => (v >= 0 ? 'up' : 'down');
+// Harga di tab Sinyal & detail mengikuti pasar yang dipilih
+const px = (v) => (isIdx() ? rp(v) : usd(v));
 // Uang mengikuti mata uang bot (IDR di Indodax, USDT di Binance); tanpa stake = USDT (data Binance)
 const money = (v, stake = 'USDT') => (stake === 'USDT' ? usd(v) : rp(v));
 // Nilai dalam Rupiah untuk menjumlah beberapa bot (USDT dikali kurs Indodax)
@@ -81,6 +92,31 @@ async function refresh() {
     render();
   }
 }
+
+async function refreshIdx() {
+  const m = view.idx;
+  if (m.loading) return;
+  m.loading = true; m.error = null; render();
+  try {
+    const [tick, btc] = await Promise.all([tickersIdx(), candlesIdx('BTC')]);
+    const regime = btcRegime(btc, P_IDX);
+    const rows = await pool(INDODAX_COINS, 4, async (coin) => {
+      const x = indicators(coin === 'BTC' ? btc : await candlesIdx(coin), regime, P_IDX);
+      return { coin, x, st: status(x, P_IDX) };
+    });
+    m.tick = tick;
+    m.rows = rows.map((r, i) => r.error ? { coin: INDODAX_COINS[i], error: r.error } : r);
+    m.regime = regime.get(btc.at(-1).time);
+    m.updated = new Date();
+  } catch {
+    m.error = 'Gagal mengambil data dari Indodax. Cek koneksi internet lalu coba lagi.';
+  } finally {
+    m.loading = false;
+    render();
+  }
+}
+
+const refreshCur = () => (isIdx() ? refreshIdx() : refresh());
 
 // Stop naik ke impas setelah harga (high candle sejak masuk atau harga live) mencapai masuk + beAtr x ATR.
 function updateStops() {
@@ -143,11 +179,11 @@ const badge = (st) => `<span class="badge ${st.kind}">${st.label}</span>`;
 
 function coinCard(r) {
   if (r.error) return `<div class="card coin muted">${logo(r.coin)}<div class="grow"><b>${r.coin}</b><small>Gagal memuat</small></div></div>`;
-  const t = view.tick[r.coin], chg = t ? t.last / t.prev - 1 : NaN;
+  const t = cur().tick[r.coin], chg = t ? t.last / t.prev - 1 : NaN;
   return `<button class="card coin" data-coin="${r.coin}">
     ${logo(r.coin, r.st.kind)}
-    <div class="grow"><b>${r.coin}<span class="pair">/USDT</span></b>
-      <small>${usd(t?.last ?? r.st.last.close)} <span class="${cls(chg)}">${pct(chg)}</span></small></div>
+    <div class="grow"><b>${r.coin}<span class="pair">/${quote()}</span></b>
+      <small>${px(t?.last ?? r.st.last.close)} <span class="${cls(chg)}">${pct(chg)}</span></small></div>
     ${spark(r.x, r.st.kind)}
     <div class="right">${badge(r.st)}${dots(r.st.score)}</div>
   </button>`;
@@ -156,15 +192,17 @@ function coinCard(r) {
 const ORDER = { buy: 0, watch: 1, wait: 2, avoid: 3, na: 4 };
 
 function signalsView() {
-  const ok = view.rows.filter((r) => r.st);
-  const list = view.rows
+  const m = cur(), ok = m.rows.filter((r) => r.st);
+  const list = m.rows
     .filter((r) => view.filter === 'all' || r.st?.kind === view.filter)
     .sort((a, b) => (ORDER[a.st?.kind] ?? 9) - (ORDER[b.st?.kind] ?? 9) || (b.st?.score ?? 0) - (a.st?.score ?? 0));
   const n = (k) => ok.filter((r) => r.st.kind === k).length;
-  const regime = view.regime == null ? '' : view.regime
+  const regime = m.regime == null ? '' : m.regime
     ? `<div class="banner good"><b>Pasar sehat</b><span>BTC di atas MA100. Sinyal BELI aktif.</span></div>`
     : `<div class="banner bad"><b>Pasar lemah</b><span>BTC di bawah MA100. Bot tidak membuka posisi baru sampai tren pulih.</span></div>`;
-  return `${regime}
+  return `<div class="seg">${[['binance', 'Binance · USDT'], ['indodax', 'Indodax · IDR']]
+      .map(([k, l]) => `<button data-market="${k}" class="${state.settings.market === k ? 'on' : ''}">${l}</button>`).join('')}</div>
+    ${regime}
     <div class="stats3">
       <div><b class="up">${n('buy')}</b><small>Beli</small></div>
       <div><b class="warn">${n('watch')}</b><small>Pantau</small></div>
@@ -176,8 +214,8 @@ function signalsView() {
 }
 
 function emptyText() {
-  if (view.loading) return '<div class="skeleton"></div>'.repeat(6);
-  if (view.error) return `<p class="empty">${view.error}</p>`;
+  if (cur().loading) return '<div class="skeleton"></div>'.repeat(6);
+  if (cur().error) return `<p class="empty">${cur().error}</p>`;
   return '<p class="empty">Tidak ada koin di kategori ini.</p>';
 }
 
@@ -265,23 +303,24 @@ function infoView() {
 
 // ---------- detail ----------
 async function openDetail(coin) {
-  const r = view.rows.find((x) => x.coin === coin);
+  const idx = isIdx(), m = cur(), r = m.rows.find((x) => x.coin === coin);
   if (!r?.st) return;
-  const { st } = r, t = view.tick[coin], held = state.positions.some((p) => p.coin === coin);
+  const { st } = r, t = m.tick[coin], held = !idx && state.positions.some((p) => p.coin === coin);
   const sheet = $('#sheet');
   sheet.innerHTML = `<div class="sheet-bar"></div>
     <button class="back" id="back"><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg>Kembali</button>
-    <div class="row"><div class="title-coin">${logo(coin)}<h2>${coin}<span class="pair">/USDT</span></h2></div>${badge(st)}</div>
-    <div class="price">${money(t?.last ?? st.last.close)}</div>
+    <div class="row"><div class="title-coin">${logo(coin)}<h2>${coin}<span class="pair">/${quote()}</span></h2></div>${badge(st)}</div>
+    <div class="price">${px(t?.last ?? st.last.close)}</div>
     <div id="chart"></div>
     <ul class="checks">${st.checks.map((c) => `<li class="${c.ok ? 'ok' : 'no'}">${c.text}</li>`).join('')}</ul>
     <div class="grid2 card flat">
-      <span>Close terakhir<b>${money(st.last.close)}</b></span><span>High 20 hari<b>${money(st.last.hh20)}</b></span>
-      <span>MA20 / MA50<b>${money(st.last.ma20)} / ${money(st.last.ma50)}</b></span><span>Stop saran<b>${money(st.stop)}</b></span>
+      <span>Close terakhir<b>${px(st.last.close)}</b></span><span>High 20 hari<b>${px(st.last.hh20)}</b></span>
+      <span>MA20 / MA50<b>${px(st.last.ma20)} / ${px(st.last.ma50)}</b></span><span>Stop saran<b>${px(st.stop)}</b></span>
     </div>
-    <h3>Uji strategi di ${coin} sejak 2019 · mode ${mode().label}</h3>
+    <h3>Uji strategi di ${coin}/${quote()} sejak 2019 · mode ${mode().label}</h3>
     <div id="bt" class="card flat"><div class="skeleton small"></div></div>
-    ${held ? '<p class="hint center">Kamu sudah memegang posisi koin ini.</p>'
+    ${idx ? '<p class="hint center">Sinyal Indodax mengikuti bot Indodax. Catatan posisi manual hanya untuk pasar Binance.</p>'
+      : held ? '<p class="hint center">Kamu sudah memegang posisi koin ini.</p>'
       : `<button class="btn ${st.kind === 'buy' ? 'primary' : 'ghost'}" id="buy">${st.kind === 'buy' ? 'Catat beli' : 'Catat beli (tanpa sinyal)'} · ${money(state.settings.stakeUsd)}</button>`}`;
   $('#overlay').classList.add('show');
   if (!history.state?.sheet) history.pushState({ sheet: 1 }, '');  // tombol/gesture kembali menutup detail
@@ -294,9 +333,10 @@ async function openDetail(coin) {
     closeDetail(); view.tab = 'positions'; render();
   });
   try {
-    view.btcFull ??= await candles('BTC', 0);
-    const full = indicators(coin === 'BTC' ? view.btcFull : await candles(coin, 0), btcRegime(view.btcFull));
-    const trades = backtest(full, mode().beAtr), s = stats(trades);
+    const get = idx ? candlesIdx : candles, p = idx ? P_IDX : PARAMS;
+    m.btcFull ??= await get('BTC', 0);
+    const full = indicators(coin === 'BTC' ? m.btcFull : await get(coin, 0), btcRegime(m.btcFull, p), p);
+    const trades = backtest(full, mode().beAtr, p), s = stats(trades);
     chart?.markers(trades);
     $('#bt').innerHTML = s.n ? `<div class="grid4">
         <span>Win rate<b>${nf(0).format(s.winRate * 100)}%</b></span><span>Transaksi<b>${s.n}</b></span>
@@ -326,7 +366,7 @@ function drawChart(el, x) {
     layout: { background: { color: 'transparent' }, textColor: color('--muted'), fontFamily: 'inherit' },
     grid: { vertLines: { visible: false }, horzLines: { color: color('--line') } },
     rightPriceScale: { borderVisible: false }, timeScale: { borderVisible: false },
-    localization: { locale: 'id-ID', priceFormatter: (v) => money(v).slice(2) },
+    localization: { locale: 'id-ID', priceFormatter: (v) => px(v).replace(/Rp|\$/, '') },
     handleScroll: false, handleScale: false,
   });
   el._chart = chart;
@@ -484,11 +524,11 @@ const TABS = [
 
 function render() {
   const body = { signals: signalsView, bot: botView, positions: positionsView, history: historyView, info: infoView }[view.tab]();
-  const last = view.rows.find((r) => r.x)?.x.at(-1);
+  const m = cur(), last = m.rows.find((r) => r.x)?.x.at(-1);
   const sub = view.tab === 'bot'
     ? (view.botLoading ? 'Menghubungi bot…' : view.botUpdated ? `Data bot · cek ${view.botUpdated.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}` : '')
-    : view.loading ? 'Memuat data Binance…' : view.updated ? `Candle ${date(last.time)} · cek ${view.updated.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}` : '';
-  const spinning = view.tab === 'bot' ? view.botLoading : view.loading;
+    : m.loading ? `Memuat data ${isIdx() ? 'Indodax' : 'Binance'}…` : m.updated && last ? `Candle ${date(last.time)} · cek ${m.updated.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}` : '';
+  const spinning = view.tab === 'bot' ? view.botLoading : m.loading;
   $('#app').innerHTML = `
     <header>
       <div><h1>${TABS.find((t) => t[0] === view.tab)[1]}</h1>
@@ -496,7 +536,7 @@ function render() {
       <button id="refresh" class="icon ${spinning ? 'spin' : ''}" aria-label="Muat ulang">
         <svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.6-6.4M21 4v5h-5"/></svg></button>
     </header>
-    ${view.error && view.rows.length ? `<p class="alert">${view.error}</p>` : ''}
+    ${m.error && m.rows.length ? `<p class="alert">${m.error}</p>` : ''}
     <main>${body}</main>
     <nav>${TABS.map(([k, l, d]) => `<button data-tab="${k}" class="${view.tab === k ? 'on' : ''}">
       <svg viewBox="0 0 24 24"><path d="${d}"/></svg><span>${l}</span>${k === 'positions' && state.positions.length ? `<em>${state.positions.length}</em>` : ''}</button>`).join('')}</nav>`;
@@ -507,7 +547,11 @@ document.addEventListener('click', async (e) => {
   if (e.target.id === 'overlay') return closeDetail();
   if (!t) return;
   if (t.id === 'back') return closeDetail();
-  if (t.id === 'refresh') return view.tab === 'bot' || view.tab === 'history' ? loadBot() : refresh();
+  if (t.id === 'refresh') return view.tab === 'bot' || view.tab === 'history' ? loadBot() : refreshCur();
+  if (t.dataset.market) {
+    state.settings.market = t.dataset.market; await save('settings'); render();
+    if (!cur().updated) refreshCur();
+  }
   if (t.dataset.tab) {
     view.tab = t.dataset.tab; render(); window.scrollTo(0, 0);
     if ((view.tab === 'bot' || view.tab === 'history') && (!view.botUpdated || Date.now() - view.botUpdated > 60000)) loadBot();
@@ -561,7 +605,9 @@ document.addEventListener('change', async (e) => {
 
 // Muat ulang saat app kembali dibuka (HP Android maupun web app di iPhone).
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible' && (!view.updated || Date.now() - view.updated > 5 * 60000)) refresh();
+  if (document.visibilityState !== 'visible') return;
+  if (!view.updated || Date.now() - view.updated > 5 * 60000) refresh();  // Binance selalu: posisi & notifikasi
+  if (isIdx() && (!view.idx.updated || Date.now() - view.idx.updated > 5 * 60000)) refreshIdx();
 });
 if (Capacitor.isNativePlatform()) CapApp.addListener('backButton', () => {
   if ($('#overlay').classList.contains('show')) closeDetail();
@@ -574,4 +620,5 @@ if (Capacitor.isNativePlatform()) CapApp.addListener('backButton', () => {
   render();
   await setDailyReminder(state.settings.reminder);
   refresh();
+  if (isIdx()) refreshIdx();
 })();
