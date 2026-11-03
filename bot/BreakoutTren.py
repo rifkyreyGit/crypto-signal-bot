@@ -49,8 +49,10 @@ class BreakoutTren(IStrategy):
 
     @property
     def BTC(self) -> str:
-        """Pair BTC untuk filter pasar, mengikuti mata uang bursa (BTC/IDR di Indodax, BTC/USDT di Binance)."""
-        return f"BTC/{self.config['stake_currency']}"
+        """Pair BTC untuk filter pasar, mengikuti mata uang bursa (BTC/IDR di Indodax, BTC/USDT di Binance,
+        BTC/USDT:USDT di futures)."""
+        stake = self.config["stake_currency"]
+        return f"BTC/{stake}:{stake}" if self.config.get("trading_mode") == "futures" else f"BTC/{stake}"
 
     def bot_start(self, **kwargs) -> None:
         self.COST = self.config.get("breakout_cost", self.COST)
@@ -113,7 +115,11 @@ class BreakoutTren(IStrategy):
         Sama dengan riset/app: stop impas berlaku mulai candle berikutnya, baik di backtest maupun live."""
         df, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
         closed = df[(df["date"] >= trade.open_date_utc) & (df["date"] + timedelta(days=1) <= current_time)]
-        return len(closed) > 0 and closed["high"].max() >= trade.open_rate + self.BE_ATR * atr
+        if not len(closed):
+            return False
+        if trade.is_short:
+            return closed["low"].min() <= trade.open_rate - self.BE_ATR * atr
+        return closed["high"].max() >= trade.open_rate + self.BE_ATR * atr
 
     def custom_stoploss(self, pair: str, trade: Trade, current_time: datetime, current_rate: float,
                         current_profit: float, after_fill: bool, **kwargs) -> float | None:
@@ -123,10 +129,13 @@ class BreakoutTren(IStrategy):
             if atr is None:
                 return None
             trade.set_custom_data("atr", atr)
-        stop = trade.open_rate - self.STOP_ATR * atr
+        d = -1 if trade.is_short else 1  # short: semua jarak dibalik (stop di atas harga masuk)
+        stop = trade.open_rate - d * self.STOP_ATR * atr
         if self.MAX_STOP:
-            stop = max(stop, trade.open_rate * (1 - self.MAX_STOP))
+            cap = trade.open_rate * (1 - d * self.MAX_STOP)
+            stop = min(stop, cap) if trade.is_short else max(stop, cap)
         if self.BE_ATR and (trade.get_custom_data("be") or self._be_touched(pair, trade, current_time, atr)):
             trade.set_custom_data("be", True)
-            stop = max(stop, trade.open_rate * (1 + self.COST + self.BE_LOCK))
+            be = trade.open_rate * (1 + d * (self.COST + self.BE_LOCK))
+            stop = min(stop, be) if trade.is_short else max(stop, be)
         return stoploss_from_absolute(stop, current_rate, is_short=trade.is_short, leverage=trade.leverage)
