@@ -254,3 +254,9 @@ nav em { position: absolute; top: -2px; left: calc(50% + 8px); font-style: norma
 .title-coin .avatar { width: 32px; height: 32px; font-size: 14px; }
 .row > .title-coin b { font-size: 17px; }
 .trade .avatar { width: 32px; height: 32px; font-size: 14px; }
+
+/* Banyak bot */
+.tag.short { font-size: 10px; font-weight: 700; letter-spacing: .04em; padding: 1px 5px; border-radius: 4px; vertical-align: 2px;
+  background: color-mix(in srgb, var(--down) 15%, transparent); color: var(--down); }
+.botname { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; }
+button.botrow { width: 100%; text-align: left; font: inherit; color: inherit; }

@@ -11,7 +11,8 @@ const DEFAULTS = {
   positions: [],
   closed: [],
   notified: [],
-  bot: { url: '', user: '', pass: '' },
+  bot: { url: '', user: '', pass: '' },  // lama (satu bot), dipindah ke bots saat load
+  bots: [],
   settings: { stakeUsd: 100, notif: true, reminder: true, exitMode: 'balanced' },
 };
 
@@ -25,6 +26,10 @@ export async function load() {
     }
   }
   state.settings = { ...DEFAULTS.settings, ...state.settings };
+  if (!state.bots.length && state.bot?.url) {
+    state.bots = [{ id: 'binance', name: 'Binance', ...state.bot }];
+    await save('bots');
+  }
 }
 
 export async function save(...keys) {

@@ -6,10 +6,11 @@ import { candles, tickers, pool, usdtIdr } from './api.js';
 import { PARAMS, EXIT_MODES, btcRegime, breakevenStop, indicators, status, backtest, stats } from './strategy.js';
 import { state, load, save, openPosition, closePosition } from './store.js';
 import { notify, setDailyReminder, ensurePermission } from './notify.js';
-import { botConfigured, fetchBot, saveBotLogin, sellNow } from './bot.js';
+import { botConfigured, fetchBot, saveBotLogin, removeBot, sellNow } from './bot.js';
 
 const $ = (s, r = document) => r.querySelector(s);
-const view = { tab: 'signals', filter: 'all', rows: [], tick: {}, regime: null, updated: null, loading: false, error: null };
+const view = { tab: 'signals', filter: 'all', rows: [], tick: {}, regime: null, updated: null, loading: false, error: null,
+  bots: {}, botErr: {}, botSel: 'all' };
 
 // ---------- format ----------
 const nf = (d) => new Intl.NumberFormat('id-ID', { maximumFractionDigits: d, minimumFractionDigits: d });
@@ -27,18 +28,27 @@ export function usd(v) {
 // Perkiraan Rupiah dari jumlah USDT (kurs Indodax), mis. "≈ Rp1,6 jt"
 function idr(v) {
   if (!Number.isFinite(v) || !view.usdtIdr) return '';
-  const r = v * view.usdtIdr, a = Math.abs(r), sign = r < 0 ? '-' : '';
+  return '≈ ' + rpShort(v * view.usdtIdr);
+}
+// Rupiah ringkas, mis. "Rp2,85 jt"
+function rpShort(r) {
+  if (!Number.isFinite(r)) return '-';
+  const a = Math.abs(r), sign = r < 0 ? '-' : '';
   const t = a >= 1e9 ? nf(2).format(a / 1e9) + ' M' : a >= 1e6 ? nf(2).format(a / 1e6) + ' jt' : a >= 1e3 ? nf(0).format(a / 1e3) + ' rb' : nf(0).format(a);
-  return `≈ ${sign}Rp${t}`;
+  return `${sign}Rp${t}`;
 }
 const pct = (v, d = 1) => Number.isFinite(v) ? (v >= 0 ? '+' : '') + nf(d).format(v * 100) + '%' : '-';
 const date = (t) => new Date(t * 1000).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: '2-digit' });
 const cls = (v) => (v >= 0 ? 'up' : 'down');
-// Uang di tab Bot/Riwayat mengikuti mata uang bot (IDR di Indodax, USDT di Binance)
-const money = (v) => (view.bot && view.bot.stake !== 'USDT' ? rp(v) : usd(v));
+// Uang mengikuti mata uang bot (IDR di Indodax, USDT di Binance); tanpa stake = USDT (data Binance)
+const money = (v, stake = 'USDT') => (stake === 'USDT' ? usd(v) : rp(v));
+// Nilai dalam Rupiah untuk menjumlah beberapa bot (USDT dikali kurs Indodax)
+const inIdr = (v, stake) => (stake === 'USDT' ? (view.usdtIdr ? v * view.usdtIdr : NaN) : v);
 // Logo koin disimpan di app (public/logos, diambil dari Binance; CDN Binance menolak hotlink).
 // Koin tanpa logo: gambar gagal dimuat dan huruf awal di belakangnya yang tampil.
-const coinOf = (pair) => String(pair).split('/')[0].toUpperCase().replace(/[^A-Z0-9]/g, '');
+const coinOf = (pair) => String(pair).split('/')[0].toUpperCase().replace(/[^A-Z0-9]/g, '').replace(/^1000(?=[A-Z])/, '');
+// Pair futures "ETH/USDT:USDT" ditampilkan "ETH/USDT"
+const pairName = (pair) => String(pair).split(':')[0];
 function logo(coin, kind = '') {
   const c = coinOf(coin);
   return `<div class="avatar ${kind ? 'a-' + kind : ''}"><span>${c.slice(0, 1)}</span>`
@@ -191,18 +201,18 @@ function positionsView() {
 
 function botHistory() {
   if (!botConfigured()) return '';
-  const b = view.bot;
-  if (!b) return `<h3>Transaksi bot</h3>${view.botError ? `<p class="alert">${esc(view.botError)}</p>` : '<div class="skeleton"></div>'}`;
-  const n = b.wins + b.losses, pnl = b.closed.reduce((s, t) => s + t.pnl, 0);
-  return `<h3>Transaksi bot ${b.dryRun ? '(dry-run)' : '(uang sungguhan)'}</h3>
+  const ready = loadedBots();
+  if (!ready.length) return `<h3>Transaksi bot</h3>${botErrors() || '<div class="skeleton"></div>'}`;
+  const trades = ready.flatMap(({ bot, d }) => d.closed.map((t) => ({ ...t, bot, stake: d.stake })))
+    .sort((x, y) => String(y.closedAt).localeCompare(String(x.closedAt)));
+  const wins = ready.reduce((s, { d }) => s + d.wins, 0), n = wins + ready.reduce((s, { d }) => s + d.losses, 0);
+  return `<h3>Transaksi bot</h3>${botErrors()}
     <div class="card summary">
-      <div><small>Win rate bot</small><b>${n ? nf(0).format((b.wins / n) * 100) + '%' : '-'}</b></div>
+      <div><small>Win rate bot</small><b>${n ? nf(0).format((wins / n) * 100) + '%' : '-'}</b></div>
       <div><small>Transaksi</small><b>${n}</b></div>
-      <div><small>Total P/L</small><b class="${cls(pnl)}">${money(pnl)}</b><small>${b.stake === 'USDT' ? idr(pnl) : ''}</small></div>
+      ${plCell(ready.map(({ d }) => ({ v: d.closed.reduce((s, t) => s + t.pnl, 0), stake: d.stake })))}
     </div>
-    <div class="list" style="margin-top:8px">${b.closed.map((t) => `<div class="card trade">
-      ${logo(t.pair)}<div class="grow"><b>${esc(t.pair)}</b><small>${ago(t.opened)} → ${ago(t.closedAt)} · ${esc(EXIT_TEXT[t.why] ?? t.why)}</small></div>
-      <div class="right"><b class="${cls(t.ret)}">${pct(t.ret, 2)}</b><small>${money(t.pnl)}</small></div></div>`).join('') || '<p class="empty">Bot belum menutup posisi.</p>'}</div>`;
+    <div class="list" style="margin-top:8px">${trades.map((t) => tradeRow(t, ready.length > 1)).join('') || '<p class="empty">Bot belum menutup posisi.</p>'}</div>`;
 }
 
 function historyView() {
@@ -212,11 +222,11 @@ function historyView() {
     <div class="card summary">
       <div><small>Win rate kamu</small><b>${c.length ? nf(0).format((w / c.length) * 100) + '%' : '-'}</b></div>
       <div><small>Transaksi</small><b>${c.length}</b></div>
-      <div><small>Total P/L</small><b class="${cls(pnl)}">${money(pnl)}</b></div>
+      <div><small>Total P/L</small><b class="${cls(pnl)}">${usd(pnl)}</b></div>
     </div>
     <div class="list" style="margin-top:8px">${c.map((t) => `<div class="card trade">
       <div class="grow"><b>${t.coin}</b><small>${new Date(t.openedAt).toLocaleDateString('id-ID')} → ${new Date(t.closedAt).toLocaleDateString('id-ID')} · ${t.why}</small></div>
-      <div class="right"><b class="${cls(t.ret)}">${pct(t.ret, 2)}</b><small>${money(t.pnl)}</small></div>
+      <div class="right"><b class="${cls(t.ret)}">${pct(t.ret, 2)}</b><small>${usd(t.pnl)}</small></div>
     </div>`).join('') || '<p class="empty">Belum ada. Ini untuk posisi yang kamu catat sendiri lewat "Catat beli" di tab Sinyal.</p>'}</div>`;
 }
 
@@ -345,54 +355,122 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(
 const EXIT_TEXT = { 'close<ma20': 'Close < MA20', trailing_stop_loss: 'Stop impas', stop_loss: 'Stop loss', force_exit: 'Ditutup manual' };
 const ago = (d) => new Date(d.replace(' ', 'T') + (d.endsWith('Z') || d.includes('+') ? '' : 'Z')).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' });
 
+const botById = (id) => state.bots.find((b) => b.id === id);
+const loadedBots = () => state.bots.filter((b) => view.bots[b.id]).map((bot) => ({ bot, d: view.bots[bot.id] }));
+const botErrors = () => state.bots.filter((b) => view.botErr[b.id])
+  .map((b) => `<p class="alert"><b>${esc(b.name)}:</b> ${esc(view.botErr[b.id])}</p>`).join('');
+const tag = (t) => (t.short ? ' <span class="tag short">SHORT</span>' : '');
+
+// Total untung/rugi beberapa bot: satu mata uang tampil apa adanya, campuran dijumlah dalam Rupiah.
+function plCell(items, label = 'Total P/L') {
+  const stakes = [...new Set(items.map((x) => x.stake))];
+  if (stakes.length === 1) {
+    const v = items.reduce((s, x) => s + x.v, 0);
+    return `<div><small>${label}</small><b class="${cls(v)}">${money(v, stakes[0])}</b><small>${stakes[0] === 'USDT' ? idr(v) : ''}</small></div>`;
+  }
+  const v = items.reduce((s, x) => s + inIdr(x.v, x.stake), 0);
+  return `<div><small>${label}</small><b class="${cls(v)}">${rpShort(v)}</b><small>≈ semua bot</small></div>`;
+}
+
+function tradeRow(t, showBot) {
+  return `<div class="card trade">
+    ${logo(t.pair)}<div class="grow"><b>${esc(pairName(t.pair))}${tag(t)}</b><small>${showBot ? esc(t.bot.name) + ' · ' : ''}${ago(t.opened)} → ${ago(t.closedAt)} · ${esc(EXIT_TEXT[t.why] ?? t.why)}</small></div>
+    <div class="right"><b class="${cls(t.ret)}">${pct(t.ret, 2)}</b><small>${money(t.pnl, t.stake)}</small></div></div>`;
+}
+
+function posCard(t, bot, d, showBot) {
+  const be = t.short ? t.stop <= t.entry : t.stop >= t.entry, key = `${bot.id}:${t.id}`;
+  return `<div class="card pos">
+    <div class="row"><div class="title-coin">${logo(t.pair)}<b>${esc(pairName(t.pair))}${tag(t)}</b></div><span class="${cls(t.ret)}">${pct(t.ret, 2)} · ${money(t.pnl, d.stake)} <small style="display:inline">${d.stake === 'USDT' ? idr(t.pnl) : ''}</small></span></div>
+    ${showBot ? `<small class="botname">${esc(bot.name)}</small>` : ''}
+    <div class="grid2" style="margin-top:10px">
+      <span>Masuk<b>${money(t.entry, d.stake)}</b></span><span>Sekarang<b>${money(t.now, d.stake)}</b></span>
+      <span>Stop${be ? ' impas ✓' : ''}<b>${money(t.stop, d.stake)}</b></span><span>Modal<b>${money(t.stake, d.stake)}</b></span>
+    </div>
+    <button class="btn danger" data-sell="${esc(key)}" ${view.selling === key ? 'disabled' : ''}>${view.selling === key ? 'Menutup…' : `${t.short ? 'Tutup short' : 'Jual'} sekarang di ±${money(t.now, d.stake)}`}</button></div>`;
+}
+
 async function loadBot() {
   if (!botConfigured() || view.botLoading) return;
-  view.botLoading = true; view.botError = null; render();
-  try { view.bot = await fetchBot(); view.botUpdated = new Date(); }
-  catch (e) { view.botError = /^(Bot|Username|URL|Tunnel)/.test(e.message) ? e.message : `Bot tidak bisa dihubungi di ${state.bot.url}. Cek URL-nya, dan pastikan Mac menyala serta bot dan tunnel jalan.`; }
-  finally { view.botLoading = false; render(); }
+  view.botLoading = true; render();
+  await Promise.all(state.bots.map(async (bot) => {
+    try { view.bots[bot.id] = await fetchBot(bot); delete view.botErr[bot.id]; }
+    catch (e) { view.botErr[bot.id] = /^(Bot|Username|URL|Tunnel)/.test(e.message) ? e.message : `Tidak bisa dihubungi di ${bot.url}. Cek URL-nya, dan pastikan bot serta tunnel di VPS jalan.`; }
+  }));
+  view.botUpdated = new Date(); view.botLoading = false; render();
 }
 
 function botLoginForm() {
-  const b = state.bot;
+  const b = view.botEdit === 'new' ? { id: '', name: '', url: '', user: '', pass: '' } : botById(view.botEdit) ?? { id: '', name: 'Binance', url: '', user: '', pass: '' };
   return `<div class="card settings">
-      <h3>Hubungkan ke bot</h3>
-      <p class="hint">Isi dari file <b>bot-login.txt</b> di folder freqtrade di Mac.</p>
+      <h3>${b.id ? `Ubah koneksi ${esc(b.name)}` : 'Hubungkan bot'}</h3>
+      <p class="hint">Isi dari file <b>bot-login.txt</b> di folder bot di VPS. URL dari <b>./url.sh</b>.</p>
+      <label>Nama<input id="bot-name" autocapitalize="words" placeholder="mis. Binance, Indodax" value="${esc(b.name)}"></label>
       <label>URL bot<input id="bot-url" type="url" inputmode="url" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="https://…" value="${esc(b.url)}"></label>
       <label>Username<input id="bot-user" autocapitalize="off" autocorrect="off" spellcheck="false" autocomplete="username" value="${esc(b.user)}"></label>
       <label>Password<input id="bot-pass" type="password" autocomplete="current-password" value="${esc(b.pass)}"></label>
+      <input id="bot-id" type="hidden" value="${esc(b.id)}">
       <button class="btn primary" id="bot-save">Simpan & hubungkan</button>
+      ${state.bots.length ? '<button class="btn ghost" data-bot="cancel">Batal</button>' : ''}
+      ${b.id ? `<button class="btn danger" data-bot-remove="${esc(b.id)}">Hapus bot ini dari app</button>` : ''}
     </div>
     <p class="disclaimer">App hanya membaca data bot. Beli/jual tetap dilakukan bot sendiri.</p>`;
 }
 
-function botView() {
-  if (!botConfigured() || view.botEdit) return botLoginForm();
-  const b = view.bot;
-  if (!b) return view.botError ? `<p class="alert">${esc(view.botError)}</p><button class="btn ghost" data-bot="edit">Ubah koneksi</button>`
+function botChips() {
+  if (state.bots.length < 2) return '';
+  return `<div class="seg">${[['all', 'Semua'], ...state.bots.map((b) => [b.id, b.name])].map(([id, name]) =>
+    `<button data-botsel="${esc(id)}" class="${view.botSel === id ? 'on' : ''}">${esc(name)}</button>`).join('')}</div>`;
+}
+
+function botAll() {
+  const ready = loadedBots();
+  if (!ready.length) return botErrors() || '<div class="skeleton"></div>'.repeat(3);
+  const open = ready.flatMap(({ bot, d }) => d.open.map((t) => ({ t, bot, d })));
+  const maxOpen = ready.reduce((s, { d }) => s + d.maxOpen, 0);
+  return `${botErrors()}
+    <div class="card summary">
+      ${plCell(ready.map(({ d }) => ({ v: d.total, stake: d.stake })), 'Saldo').replace(/class="(up|down)"/, '')}
+      ${plCell(ready.map(({ d }) => ({ v: d.profit, stake: d.stake })), 'Profit')}
+      <div><small>Posisi</small><b>${open.length}/${maxOpen}</b><small>${ready.length} bot</small></div>
+    </div>
+    <h3>Bot</h3>
+    <div class="list">${ready.map(({ bot, d }) => {
+      const n = d.wins + d.losses, ret = d.profit / d.start;
+      return `<button class="card trade botrow" data-botsel="${esc(bot.id)}">
+        <div class="grow"><b>${esc(bot.name)}</b><small>${esc(d.exchange ?? '')} · ${esc(d.strategy)} · ${d.dryRun ? 'dry-run' : 'UANG ASLI'} · ${d.open.length}/${d.maxOpen} posisi · ${n} transaksi</small></div>
+        <div class="right"><b class="${cls(ret)}">${pct(ret)}</b><small>${money(d.total, d.stake)}</small></div></button>`;
+    }).join('')}</div>
+    <h3>Posisi terbuka</h3>
+    <div class="list">${open.map(({ t, bot, d }) => posCard(t, bot, d, true)).join('') || '<p class="empty">Belum ada posisi. Semua bot menunggu sinyal.</p>'}</div>
+    <button class="btn ghost" data-bot="new">+ Tambah bot</button>`;
+}
+
+function botOne(bot) {
+  const b = view.bots[bot.id];
+  if (!b) return view.botErr[bot.id] ? `<p class="alert">${esc(view.botErr[bot.id])}</p><button class="btn ghost" data-bot="${esc(bot.id)}">Ubah koneksi</button>`
     : '<div class="skeleton"></div>'.repeat(3);
   const n = b.wins + b.losses, ret = b.profit / b.start;
-  return `${view.botError ? `<p class="alert">${esc(view.botError)}</p>` : ''}
+  return `${view.botErr[bot.id] ? `<p class="alert">${esc(view.botErr[bot.id])}</p>` : ''}
     <div class="banner ${b.dryRun ? 'good' : 'bad'}"><b>${b.dryRun ? 'DRY-RUN · saldo simulasi' : 'LIVE · uang sungguhan'}</b>
       <span>${esc(b.exchange ?? '')} · ${esc(b.strategy)} · status ${esc(b.state)} · ${b.open.length}/${b.maxOpen} posisi</span></div>
     <div class="card summary">
-      <div><small>Saldo</small><b>${money(b.total)}</b><small>${b.stake === 'USDT' ? idr(b.total) : ''}</small></div>
-      <div><small>Profit</small><b class="${cls(ret)}">${pct(ret)}</b><small>${money(b.profit)}${b.stake === 'USDT' && idr(b.profit) ? '<br>' + idr(b.profit) : ''}</small></div>
+      <div><small>Saldo</small><b>${money(b.total, b.stake)}</b><small>${b.stake === 'USDT' ? idr(b.total) : ''}</small></div>
+      <div><small>Profit</small><b class="${cls(ret)}">${pct(ret)}</b><small>${money(b.profit, b.stake)}${b.stake === 'USDT' && idr(b.profit) ? '<br>' + idr(b.profit) : ''}</small></div>
       <div><small>Win rate</small><b>${n ? nf(0).format((b.wins / n) * 100) + '%' : '-'}</b></div>
     </div>
     <h3>Posisi terbuka</h3>
-    <div class="list">${b.open.map((t) => `<div class="card pos">
-      <div class="row"><div class="title-coin">${logo(t.pair)}<b>${esc(t.pair)}</b></div><span class="${cls(t.ret)}">${pct(t.ret, 2)} · ${money(t.pnl)} <small style="display:inline">${b.stake === 'USDT' ? idr(t.pnl) : ''}</small></span></div>
-      <div class="grid2" style="margin-top:10px">
-        <span>Masuk<b>${money(t.entry)}</b></span><span>Sekarang<b>${money(t.now)}</b></span>
-        <span>Stop${t.stop >= t.entry ? ' impas ✓' : ''}<b>${money(t.stop)}</b></span><span>Modal<b>${money(t.stake)}</b></span>
-      </div>
-      <button class="btn danger" data-sell="${t.id}" ${view.selling === t.id ? 'disabled' : ''}>${view.selling === t.id ? 'Menjual…' : `Jual sekarang di ±${money(t.now)}`}</button></div>`).join('') || '<p class="empty">Belum ada posisi. Bot menunggu sinyal breakout.</p>'}</div>
+    <div class="list">${b.open.map((t) => posCard(t, bot, b, false)).join('') || '<p class="empty">Belum ada posisi. Bot menunggu sinyal.</p>'}</div>
     <h3>Transaksi selesai (${n})</h3>
-    <div class="list">${b.closed.slice(0, 20).map((t) => `<div class="card trade">
-      ${logo(t.pair)}<div class="grow"><b>${esc(t.pair)}</b><small>${ago(t.opened)} → ${ago(t.closedAt)} · ${esc(EXIT_TEXT[t.why] ?? t.why)}</small></div>
-      <div class="right"><b class="${cls(t.ret)}">${pct(t.ret, 2)}</b><small>${money(t.pnl)}</small></div></div>`).join('') || '<p class="empty">Belum ada.</p>'}</div>
-    <button class="btn ghost" data-bot="edit">Ubah koneksi bot</button>`;
+    <div class="list">${b.closed.slice(0, 20).map((t) => tradeRow({ ...t, stake: b.stake }, false)).join('') || '<p class="empty">Belum ada.</p>'}</div>
+    <button class="btn ghost" data-bot="${esc(bot.id)}">Ubah koneksi ${esc(bot.name)}</button>
+    ${state.bots.length < 2 ? '<button class="btn ghost" data-bot="new">+ Tambah bot</button>' : ''}`;
+}
+
+function botView() {
+  if (!botConfigured() || view.botEdit) return botLoginForm();
+  const one = state.bots.length === 1 ? state.bots[0] : botById(view.botSel);
+  return botChips() + (one ? botOne(one) : botAll());
 }
 
 // ---------- shell ----------
@@ -434,21 +512,31 @@ document.addEventListener('click', async (e) => {
     view.tab = t.dataset.tab; render(); window.scrollTo(0, 0);
     if ((view.tab === 'bot' || view.tab === 'history') && (!view.botUpdated || Date.now() - view.botUpdated > 60000)) loadBot();
   }
-  if (t.dataset.bot === 'edit') { view.botEdit = true; render(); }
+  if (t.dataset.bot) { view.botEdit = t.dataset.bot === 'cancel' ? null : t.dataset.bot; render(); window.scrollTo(0, 0); }
+  if (t.dataset.botsel) { view.botSel = t.dataset.botsel; render(); window.scrollTo(0, 0); }
+  if (t.dataset.botRemove) {
+    const bot = botById(t.dataset.botRemove);
+    if (!bot || !confirm(`Hapus ${bot.name} dari app?\n\nBot di VPS tetap jalan; hanya koneksinya yang dihapus dari HP ini.`)) return;
+    await removeBot(bot.id);
+    delete view.bots[bot.id]; delete view.botErr[bot.id];
+    view.botEdit = null; view.botSel = 'all'; render();
+  }
   if (t.dataset.sell && !view.selling) {
-    const p = view.bot?.open.find((x) => String(x.id) === t.dataset.sell);
-    if (!p) return;
-    const akun = view.bot.dryRun ? 'saldo simulasi (dry-run)' : 'UANG SUNGGUHAN';
-    if (!confirm(`Jual ${p.pair} sekarang?\n\nHarga ±${money(p.now)} · hasil ${pct(p.ret, 2)} (${money(p.pnl)})\nAkun: ${akun}\n\nBot akan menjual di harga pasar saat ini.`)) return;
-    view.selling = p.id; render();
-    try { await sellNow(p.id); view.botError = null; }
-    catch (err) { view.botError = `Gagal menjual ${p.pair}: ${err.message}`; }
+    const [botId, tradeId] = t.dataset.sell.split(':');
+    const bot = botById(botId), d = view.bots[botId], p = d?.open.find((x) => String(x.id) === tradeId);
+    if (!bot || !p) return;
+    const akun = d.dryRun ? 'saldo simulasi (dry-run)' : 'UANG SUNGGUHAN';
+    const aksi = p.short ? 'Tutup short' : 'Jual';
+    if (!confirm(`${aksi} ${pairName(p.pair)} di ${bot.name} sekarang?\n\nHarga ±${money(p.now, d.stake)} · hasil ${pct(p.ret, 2)} (${money(p.pnl, d.stake)})\nAkun: ${akun}\n\nBot akan menutup posisi di harga pasar saat ini.`)) return;
+    view.selling = t.dataset.sell; render();
+    try { await sellNow(bot, p.id); delete view.botErr[botId]; }
+    catch (err) { view.botErr[botId] = `Gagal menutup ${pairName(p.pair)}: ${err.message}`; }
     finally { view.selling = null; }
     setTimeout(loadBot, 1500);
   }
   if (t.id === 'bot-save') {
-    await saveBotLogin($('#bot-url').value, $('#bot-user').value, $('#bot-pass').value);
-    view.botEdit = false; view.bot = null; loadBot();
+    const id = await saveBotLogin($('#bot-id').value, $('#bot-name').value, $('#bot-url').value, $('#bot-user').value, $('#bot-pass').value);
+    view.botEdit = null; delete view.bots[id]; delete view.botErr[id]; view.botSel = state.bots.length > 1 ? id : 'all'; loadBot();
   }
   if (t.dataset.filter) { view.filter = t.dataset.filter; render(); }
   if (t.dataset.mode) { state.settings.exitMode = t.dataset.mode; await save('settings'); render(); }
