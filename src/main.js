@@ -54,6 +54,8 @@ const px = (v) => (isIdx() ? rp(v) : usd(v));
 // Uang mengikuti mata uang bot (IDR di Indodax, USDT di Binance); tanpa stake = USDT (data Binance)
 const money = (v, stake = 'USDT') => (stake === 'USDT' ? usd(v) : rp(v));
 // Nilai dalam Rupiah untuk menjumlah beberapa bot (USDT dikali kurs Indodax)
+// Jumlah USDT plus perkiraan Rupiah di bawahnya, mis. "$12,5<br>≈ Rp225 rb"
+const moneyIdr = (v, stake = 'USDT') => money(v, stake) + (stake === 'USDT' && idr(v) ? '<br>' + idr(v) : '');
 const inIdr = (v, stake) => (stake === 'USDT' ? (view.usdtIdr ? v * view.usdtIdr : NaN) : v);
 // Logo koin disimpan di app (public/logos, diambil dari Binance; CDN Binance menolak hotlink).
 // Koin tanpa logo: gambar gagal dimuat dan huruf awal di belakangnya yang tampil.
@@ -260,11 +262,11 @@ function historyView() {
     <div class="card summary">
       <div><small>Win rate kamu</small><b>${c.length ? nf(0).format((w / c.length) * 100) + '%' : '-'}</b></div>
       <div><small>Transaksi</small><b>${c.length}</b></div>
-      <div><small>Total P/L</small><b class="${cls(pnl)}">${usd(pnl)}</b></div>
+      <div><small>Total P/L</small><b class="${cls(pnl)}">${usd(pnl)}</b><small>${idr(pnl)}</small></div>
     </div>
     <div class="list" style="margin-top:8px">${c.map((t) => `<div class="card trade">
       <div class="grow"><b>${t.coin}</b><small>${new Date(t.openedAt).toLocaleDateString('id-ID')} → ${new Date(t.closedAt).toLocaleDateString('id-ID')} · ${t.why}</small></div>
-      <div class="right"><b class="${cls(t.ret)}">${pct(t.ret, 2)}</b><small>${usd(t.pnl)}</small></div>
+      <div class="right"><b class="${cls(t.ret)}">${pct(t.ret, 2)}</b><small>${moneyIdr(t.pnl)}</small></div>
     </div>`).join('') || '<p class="empty">Belum ada. Ini untuk posisi yang kamu catat sendiri lewat "Catat beli" di tab Sinyal.</p>'}</div>`;
 }
 
@@ -415,7 +417,7 @@ function plCell(items, label = 'Total P/L') {
 function tradeRow(t, showBot) {
   return `<div class="card trade">
     ${logo(t.pair)}<div class="grow"><b>${esc(pairName(t.pair))}${tag(t)}</b><small>${showBot ? esc(t.bot.name) + ' · ' : ''}${ago(t.opened)} → ${ago(t.closedAt)} · ${esc(EXIT_TEXT[t.why] ?? t.why)}</small></div>
-    <div class="right"><b class="${cls(t.ret)}">${pct(t.ret, 2)}</b><small>${money(t.pnl, t.stake)}</small></div></div>`;
+    <div class="right"><b class="${cls(t.ret)}">${pct(t.ret, 2)}</b><small>${moneyIdr(t.pnl, t.stake)}</small></div></div>`;
 }
 
 function posCard(t, bot, d, showBot) {
@@ -479,7 +481,7 @@ function botAll() {
       const n = d.wins + d.losses, ret = d.profit / d.start;
       return `<button class="card trade botrow" data-botsel="${esc(bot.id)}">
         <div class="grow"><b>${esc(bot.name)}</b><small>${esc(d.exchange ?? '')} · ${esc(d.strategy)} · ${d.dryRun ? 'dry-run' : 'UANG ASLI'} · ${d.open.length}/${d.maxOpen} posisi · ${n} transaksi</small></div>
-        <div class="right"><b class="${cls(ret)}">${pct(ret)}</b><small>${money(d.total, d.stake)}</small></div></button>`;
+        <div class="right"><b class="${cls(ret)}">${pct(ret)}</b><small>${moneyIdr(d.total, d.stake)}</small></div></button>`;
     }).join('')}</div>
     <h3>Posisi terbuka</h3>
     <div class="list">${open.map(({ t, bot, d }) => posCard(t, bot, d, true)).join('') || '<p class="empty">Belum ada posisi. Semua bot menunggu sinyal.</p>'}</div>
@@ -496,7 +498,7 @@ function botOne(bot) {
       <span>${esc(b.exchange ?? '')} · ${esc(b.strategy)} · status ${esc(b.state)} · ${b.open.length}/${b.maxOpen} posisi</span></div>
     <div class="card summary">
       <div><small>Saldo</small><b>${money(b.total, b.stake)}</b><small>${b.stake === 'USDT' ? idr(b.total) : ''}</small></div>
-      <div><small>Profit</small><b class="${cls(ret)}">${pct(ret)}</b><small>${money(b.profit, b.stake)}${b.stake === 'USDT' && idr(b.profit) ? '<br>' + idr(b.profit) : ''}</small></div>
+      <div><small>Profit</small><b class="${cls(ret)}">${pct(ret)}</b><small>${moneyIdr(b.profit, b.stake)}</small></div>
       <div><small>Win rate</small><b>${n ? nf(0).format((b.wins / n) * 100) + '%' : '-'}</b></div>
     </div>
     <h3>Posisi terbuka</h3>

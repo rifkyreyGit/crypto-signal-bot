@@ -10,7 +10,6 @@ mkdir -p laporan
 BOTS=(
   "binance|config.binance.json|BreakoutTren|tradesv3.binance.dryrun.sqlite|2026-10-29"
   "binance-dua|config.dua.json|BreakoutDua|tradesv3.dua.dryrun.sqlite|2026-11-03"
-  "indodax|config.breakout.json|BreakoutTren|tradesv3.breakout.dryrun.sqlite|2026-11-03"
 )
 
 {
