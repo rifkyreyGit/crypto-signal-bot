@@ -225,7 +225,7 @@ function positionsView() {
   if (!state.positions.length) return `<p class="empty">Belum ada posisi.<br>Buka koin bersinyal <b>BELI</b> lalu ketuk “Catat beli”.</p>`;
   return `<div class="list">${state.positions.map((p) => {
     const live = view.tick[p.coin]?.last, ret = live / p.entry - 1 - PARAMS.cost, why = exitReason(p);
-    return `<div class="card pos">
+    return `<div class="card pos tap" data-mpos="${p.id}">
       <div class="row"><b>${p.coin}/USDT</b>${why ? '<span class="badge avoid">JUAL</span>' : '<span class="badge hold">TAHAN</span>'}</div>
       <div class="big ${cls(ret)}">${pct(ret, 2)} <small>${usd(p.stake * ret)}</small></div>
       <div class="grid2">
@@ -350,6 +350,63 @@ async function openDetail(coin) {
   }
 }
 
+// ---------- detail posisi (bot & catatan manual) ----------
+// Grafik harian dengan garis masuk, stop loss, titik stop pindah ke impas, dan level jual otomatis.
+// Strategi ini tidak memakai take profit tetap: untung dikunci lewat stop impas, lalu dijual saat tren patah.
+async function openPosDetail(p) {
+  const base = String(p.pair).split('/')[0], coin = coinOf(p.pair), k = /^1000/.test(base) ? 1000 : 1;  // 1000PEPE = 1000x harga PEPE
+  const m = (v) => money(v, p.cur), d = p.short ? -1 : 1, dua = /Dua/.test(p.strategy ?? '');
+  const sheet = $('#sheet');
+  sheet.innerHTML = `<div class="sheet-bar"></div>
+    <button class="back" id="back"><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg>Kembali</button>
+    <div class="row"><div class="title-coin">${logo(p.pair)}<h2>${esc(pairName(p.pair))}${tag(p)}</h2></div><span class="${cls(p.ret)}"><b>${pct(p.ret, 2)}</b></span></div>
+    <small class="botname">${esc(p.title)} · masuk ${new Date(p.opened).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: '2-digit' })}</small>
+    <div class="price">${m(p.now)}</div>
+    <div id="chart"></div>
+    <div id="lv"><div class="skeleton small"></div></div>
+    ${p.sellKey ? `<button class="btn danger" data-sell="${esc(p.sellKey)}">${p.short ? 'Tutup short' : 'Jual'} sekarang di ±${m(p.now)}</button>` : ''}
+    ${p.closeId ? `<button class="btn ghost" data-close="${p.closeId}">Tutup posisi di ${m(p.now)}</button>` : ''}`;
+  $('#overlay').classList.add('show');
+  if (!history.state?.sheet) history.pushState({ sheet: 1 }, '');
+  sheet.scrollTop = 0;
+  try {
+    const raw = p.cur === 'IDR' ? await candlesIdx(coin, 200) : await candles(coin, 200);
+    const x = indicators(raw.map((c) => ({ ...c, open: c.open * k, high: c.high * k, low: c.low * k, close: c.close * k })), new Map(), p.cur === 'IDR' ? P_IDX : PARAMS);
+    const day = Math.floor(p.opened / 86400000) * 86400, i0 = x.findIndex((c) => c.time >= day);
+    const atrIn = (x[i0 > 0 ? i0 - 1 : x.length - 1] ?? x.at(-1)).atr, last = x.at(-1);
+    const cost = p.cur === 'IDR' ? P_IDX.cost : PARAMS.cost;
+    const beAt = p.entry + d * 2 * atrIn, bePrice = p.entry * (1 + d * (cost + PARAMS.beLock));
+    const beHit = p.beHit ?? d * (p.stop - p.entry) >= 0;  // bot: stop sudah di/atas harga masuk = sudah impas
+    const exitLv = p.short && dua ? last.ma50 : last.ma20, exitName = p.short && dua ? 'MA50' : 'MA20';
+    const chart = drawChart($('#chart'), x.slice(-120));
+    chart.levels([
+      { price: p.entry, color: '--text', title: 'Masuk' },
+      { price: p.stop, color: '--down', title: beHit ? 'SL impas' : 'SL' },
+      ...(beHit ? [] : [{ price: beAt, color: '--up', title: 'Impas', dash: true }]),
+    ]);
+    if (i0 >= 0) chart.entry(x[i0].time, p.short);
+    const far = (v) => pct(d * (v / p.now - 1), 1);
+    const sl = d * (p.stop / p.entry - 1);
+    $('#lv').innerHTML = `<div class="grid2 card flat">
+        <span>Masuk<b>${m(p.entry)}</b></span><span>Sekarang<b class="${cls(p.ret)}">${m(p.now)}</b></span>
+        <span>Stop loss (SL)${beHit ? ' · impas ✓' : ''}<b class="down">${m(p.stop)}</b><small>${pct(sl, 1)} dari masuk · ${far(p.stop)} dari sekarang</small></span>
+        <span>Take profit (TP)<b>Tidak tetap</b><small>jual saat close ${p.short ? '>' : '<'} ${exitName} (${m(exitLv)})</small></span>
+        ${beHit ? `<span>Untung terkunci<b class="up">≥ ${pct(d * (p.stop / p.entry - 1), 1)}</b><small>stop sudah di atas harga masuk</small></span>`
+          : `<span>Stop pindah impas<b class="up">${m(beAt)}</b><small>kalau ${p.short ? 'low' : 'high'} candle mencapai ini (${far(beAt)} lagi), SL naik ke ${m(bePrice)}</small></span>`}
+        <span>ATR14 saat masuk<b>${m(atrIn)}</b><small>${pct(atrIn / p.entry, 1)} dari harga</small></span>
+        <span>MA20 / MA50<b>${m(last.ma20)} / ${m(last.ma50)}</b></span>
+        <span>RSI14<b>${Number.isFinite(last.rsi) ? nf(0).format(last.rsi) : '-'}</b></span>
+      </div>
+      <ul class="checks">
+        <li class="${(p.short ? last.close < exitLv : last.close > exitLv) ? 'ok' : 'no'}">Close kemarin ${m(last.close)} ${(p.short ? last.close < exitLv : last.close > exitLv) ? `masih ${p.short ? 'di bawah' : 'di atas'} ${exitName}: tahan` : `sudah ${p.short ? 'di atas' : 'di bawah'} ${exitName}: bot menjual di candle berikutnya`}</li>
+        <li class="${beHit ? 'ok' : 'no'}">${beHit ? 'Stop sudah di impas, posisi ini tidak bisa rugi lagi (selain gap harga)' : `Stop masih ${pct(sl, 1)} dari harga masuk`}</li>
+      </ul>
+      <p class="hint">Garis di grafik: hitam/putih = harga masuk, merah = stop loss, hijau putus-putus = titik stop pindah ke impas. Garis MA20 (biru) dan MA50 (oranye) adalah rata-rata harga.</p>`;
+  } catch {
+    $('#lv').innerHTML = '<p class="hint">Gagal memuat grafik koin ini.</p>';
+  }
+}
+
 function closeDetail(fromHistory = false) {
   $('#overlay').classList.remove('show');
   $('#chart')?._chart?.remove();
@@ -381,6 +438,12 @@ function drawChart(el, x) {
   chart.timeScale().fitContent();
   const from = x[0].time;
   return {
+    levels(ls) {
+      for (const l of ls) if (Number.isFinite(l.price)) cs.createPriceLine({ price: l.price, color: color(l.color), lineWidth: 1.5, lineStyle: l.dash ? 2 : 0, axisLabelVisible: true, title: l.title });
+    },
+    entry(time, short) {
+      cs.setMarkers([{ time, position: short ? 'aboveBar' : 'belowBar', color: color('--accent'), shape: short ? 'arrowDown' : 'arrowUp', text: 'Masuk' }]);
+    },
     markers(trades) {
       const m = [];
       for (const t of trades.filter((t) => t.entryTime >= from)) {
@@ -422,7 +485,7 @@ function tradeRow(t, showBot) {
 
 function posCard(t, bot, d, showBot) {
   const be = t.short ? t.stop <= t.entry : t.stop >= t.entry, key = `${bot.id}:${t.id}`;
-  return `<div class="card pos">
+  return `<div class="card pos tap" data-pos="${esc(key)}">
     <div class="row"><div class="title-coin">${logo(t.pair)}<b>${esc(pairName(t.pair))}${tag(t)}</b></div><span class="${cls(t.ret)}">${pct(t.ret, 2)} · ${money(t.pnl, d.stake)} <small style="display:inline">${d.stake === 'USDT' ? idr(t.pnl) : ''}</small></span></div>
     ${showBot ? `<small class="botname">${esc(bot.name)}</small>` : ''}
     <div class="grid2" style="margin-top:10px">
@@ -547,6 +610,20 @@ function render() {
 document.addEventListener('click', async (e) => {
   const t = e.target.closest('button');
   if (e.target.id === 'overlay') return closeDetail();
+  const card = e.target.closest('[data-pos],[data-mpos]');
+  if (card && (!t || !card.contains(t))) {
+    if (card.dataset.pos) {
+      const [botId, tradeId] = card.dataset.pos.split(':');
+      const bot = botById(botId), d = view.bots[botId], p = d?.open.find((x) => String(x.id) === tradeId);
+      if (p) openPosDetail({ ...p, opened: Date.parse(p.opened.replace(' ', 'T') + (/Z|\+/.test(p.opened) ? '' : 'Z')), cur: d.stake,
+        title: bot.name, strategy: d.strategy, sellKey: card.dataset.pos });
+    } else {
+      const p = state.positions.find((x) => x.id === +card.dataset.mpos), now = view.tick[p?.coin]?.last;
+      if (p) openPosDetail({ pair: `${p.coin}/USDT`, entry: p.entry, now: now ?? p.entry, stop: p.stop, opened: p.openedAt, cur: 'USDT',
+        ret: now / p.entry - 1 - PARAMS.cost, title: 'Catatan manual', beHit: p.beHit, closeId: p.id });
+    }
+    return;
+  }
   if (!t) return;
   if (t.id === 'back') return closeDetail();
   if (t.id === 'refresh') return view.tab === 'bot' || view.tab === 'history' ? loadBot() : refreshCur();
@@ -574,7 +651,7 @@ document.addEventListener('click', async (e) => {
     const akun = d.dryRun ? 'saldo simulasi (dry-run)' : 'UANG SUNGGUHAN';
     const aksi = p.short ? 'Tutup short' : 'Jual';
     if (!confirm(`${aksi} ${pairName(p.pair)} di ${bot.name} sekarang?\n\nHarga ±${money(p.now, d.stake)} · hasil ${pct(p.ret, 2)} (${money(p.pnl, d.stake)})\nAkun: ${akun}\n\nBot akan menutup posisi di harga pasar saat ini.`)) return;
-    view.selling = t.dataset.sell; render();
+    closeDetail(); view.selling = t.dataset.sell; render();
     try { await sellNow(bot, p.id); delete view.botErr[botId]; }
     catch (err) { view.botErr[botId] = `Gagal menutup ${pairName(p.pair)}: ${err.message}`; }
     finally { view.selling = null; }
@@ -592,6 +669,7 @@ document.addEventListener('click', async (e) => {
     const price = view.tick[p.coin]?.last;
     if (!Number.isFinite(price)) return;
     if (!confirm(`Tutup ${p.coin} di ${usd(price)}?`)) return;
+    closeDetail();
     await closePosition(p.id, price, exitReason(p) ?? 'Ditutup manual');
     render();
   }

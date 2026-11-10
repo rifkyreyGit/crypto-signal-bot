@@ -260,3 +260,7 @@ nav em { position: absolute; top: -2px; left: calc(50% + 8px); font-style: norma
   background: color-mix(in srgb, var(--down) 15%, transparent); color: var(--down); }
 .botname { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; }
 button.botrow { width: 100%; text-align: left; font: inherit; color: inherit; }
+
+/* Kartu posisi bisa diketuk untuk grafik & level SL/impas */
+.card.tap { cursor: pointer; }
+.grid2 span small { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; font-weight: 400; }
