@@ -264,3 +264,4 @@ button.botrow { width: 100%; text-align: left; font: inherit; color: inherit; }
 /* Kartu posisi bisa diketuk untuk grafik & level SL/impas */
 .card.tap { cursor: pointer; }
 .grid2 span small { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; font-weight: 400; }
+header .live { color: var(--up); }

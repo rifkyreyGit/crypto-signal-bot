@@ -7,10 +7,11 @@ import { PARAMS, EXIT_MODES, btcRegime, breakevenStop, indicators, status, backt
 import { state, load, save, openPosition, closePosition, INDODAX_COINS } from './store.js';
 import { notify, setDailyReminder, ensurePermission } from './notify.js';
 import { botConfigured, fetchBot, saveBotLogin, removeBot, sellNow } from './bot.js';
+import { watch, onLive, isLive } from './live.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const view = { tab: 'signals', filter: 'all', rows: [], tick: {}, regime: null, updated: null, loading: false, error: null,
-  bots: {}, botErr: {}, botSel: 'all',
+  bots: {}, botErr: {}, botSel: 'all', live: {}, detail: null,
   idx: { rows: [], tick: {}, regime: null, updated: null, loading: false, error: null } };
 
 // Pasar di tab Sinyal: Binance (USDT, default, juga dipakai posisi manual & notifikasi) atau Indodax (IDR).
@@ -86,6 +87,7 @@ async function refresh() {
     view.rows = rows.map((r, i) => r.error ? { coin: state.coins[i], error: r.error } : r);
     view.regime = btcRegime(btc).get(btc.at(-1).time);
     view.updated = new Date();
+    watchLive();
     await checkAlerts();
   } catch (e) {
     view.error = 'Gagal mengambil data dari Binance. Cek koneksi internet lalu coba lagi.';
@@ -119,6 +121,50 @@ async function refreshIdx() {
 }
 
 const refreshCur = () => (isIdx() ? refreshIdx() : refresh());
+
+// ---------- harga live ----------
+// Koin yang dipantau: daftar sinyal, posisi manual, dan posisi bot USDT (harga spot sebagai perkiraan futures),
+// plus candle harian koin yang sedang dibuka di detail.
+function watchLive() {
+  const bot = Object.values(view.bots).filter((d) => d.stake === 'USDT').flatMap((d) => d.open.map((t) => coinOf(t.pair)));
+  const coins = new Set([...state.coins, ...state.positions.map((p) => p.coin), ...bot]);
+  watch([...[...coins].map((c) => `${c.toLowerCase()}usdt@miniTicker`), ...(view.detail ? [`${view.detail.coin.toLowerCase()}usdt@kline_1d`] : [])]);
+}
+
+// Gambar ulang paling sering tiap 1,5 detik, dan jangan saat sedang mengetik di form.
+let renderTimer = null;
+function liveRender() {
+  if (renderTimer) return;
+  renderTimer = setTimeout(() => {
+    renderTimer = null;
+    if (view.botEdit || /INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName)) return;
+    render();
+  }, 1500);
+}
+
+onLive({
+  ticker(coin, price) {
+    view.live[coin] = price;
+    if (view.tick[coin]) view.tick[coin].last = price;
+    liveRender();
+  },
+  kline(coin, k) {
+    const d = view.detail;
+    if (!d || d.coin !== coin) return;
+    const m = d.mult, c = { time: k.t / 1000, open: +k.o * m, high: +k.h * m, low: +k.l * m, close: +k.c * m };
+    d.chart?.live(c);
+    const el = $('#sheet .price');
+    if (el) el.textContent = money(c.close, 'USDT');
+  },
+});
+
+// Posisi bot dengan harga live: geser untung/rugi dari angka terakhir bot sebesar perubahan harga sejak itu.
+function liveBotPos(t, d) {
+  const p = d.stake === 'USDT' && view.live[coinOf(t.pair)];
+  if (!p) return t;
+  const now = p * (/^1000/.test(t.pair) ? 1000 : 1), dl = (t.short ? -1 : 1) * (now - t.now) / t.entry;
+  return { ...t, now, ret: t.ret + dl, pnl: t.pnl + dl * t.stake };
+}
 
 // Stop naik ke impas setelah harga (high candle sejak masuk atau harga live) mencapai masuk + beAtr x ATR.
 function updateStops() {
@@ -328,6 +374,7 @@ async function openDetail(coin) {
   if (!history.state?.sheet) history.pushState({ sheet: 1 }, '');  // tombol/gesture kembali menutup detail
   sheet.scrollTop = 0;
   const chart = drawChart($('#chart'), r.x.slice(-150));
+  if (!idx) { view.detail = { coin, mult: 1, chart }; watchLive(); }
   $('#buy')?.addEventListener('click', async () => {
     if (st.kind !== 'buy' && !confirm('Belum ada sinyal BELI. Tetap catat posisi?')) return;
     const price = view.tick[coin]?.last ?? st.last.close;
@@ -379,6 +426,7 @@ async function openPosDetail(p) {
     const beHit = p.beHit ?? d * (p.stop - p.entry) >= 0;  // bot: stop sudah di/atas harga masuk = sudah impas
     const exitLv = p.short && dua ? last.ma50 : last.ma20, exitName = p.short && dua ? 'MA50' : 'MA20';
     const chart = drawChart($('#chart'), x.slice(-120));
+    if (p.cur === 'USDT' && $('#overlay').classList.contains('show')) { view.detail = { coin, mult: k, chart }; watchLive(); }
     chart.levels([
       { price: p.entry, color: '--text', title: 'Masuk' },
       { price: p.stop, color: '--down', title: beHit ? 'SL impas' : 'SL' },
@@ -410,6 +458,7 @@ async function openPosDetail(p) {
 function closeDetail(fromHistory = false) {
   $('#overlay').classList.remove('show');
   $('#chart')?._chart?.remove();
+  if (view.detail) { view.detail = null; watchLive(); }
   if (!fromHistory && history.state?.sheet) history.back();
 }
 
@@ -438,6 +487,9 @@ function drawChart(el, x) {
   chart.timeScale().fitContent();
   const from = x[0].time;
   return {
+    live(c) {
+      if (c.time >= x.at(-1).time) cs.update(c);
+    },
     levels(ls) {
       for (const l of ls) if (Number.isFinite(l.price)) cs.createPriceLine({ price: l.price, color: color(l.color), lineWidth: 1.5, lineStyle: l.dash ? 2 : 0, axisLabelVisible: true, title: l.title });
     },
@@ -484,6 +536,7 @@ function tradeRow(t, showBot) {
 }
 
 function posCard(t, bot, d, showBot) {
+  t = liveBotPos(t, d);
   const be = t.short ? t.stop <= t.entry : t.stop >= t.entry, key = `${bot.id}:${t.id}`;
   return `<div class="card pos tap" data-pos="${esc(key)}">
     <div class="row"><div class="title-coin">${logo(t.pair)}<b>${esc(pairName(t.pair))}${tag(t)}</b></div><span class="${cls(t.ret)}">${pct(t.ret, 2)} · ${money(t.pnl, d.stake)} <small style="display:inline">${d.stake === 'USDT' ? idr(t.pnl) : ''}</small></span></div>
@@ -502,7 +555,7 @@ async function loadBot() {
     try { view.bots[bot.id] = await fetchBot(bot); delete view.botErr[bot.id]; }
     catch (e) { view.botErr[bot.id] = /^(Bot|Username|URL|Tunnel)/.test(e.message) ? e.message : `Tidak bisa dihubungi di ${bot.url}. Cek URL-nya, dan pastikan bot serta tunnel di VPS jalan.`; }
   }));
-  view.botUpdated = new Date(); view.botLoading = false; render();
+  view.botUpdated = new Date(); view.botLoading = false; render(); watchLive();
 }
 
 function botLoginForm() {
@@ -592,7 +645,7 @@ function render() {
   const m = cur(), last = m.rows.find((r) => r.x)?.x.at(-1);
   const sub = view.tab === 'bot'
     ? (view.botLoading ? 'Menghubungi bot…' : view.botUpdated ? `Data bot · cek ${view.botUpdated.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}` : '')
-    : m.loading ? `Memuat data ${isIdx() ? 'Indodax' : 'Binance'}…` : m.updated && last ? `Candle ${date(last.time)} · cek ${m.updated.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}` : '';
+    : m.loading ? `Memuat data ${isIdx() ? 'Indodax' : 'Binance'}…` : m.updated && last ? `Candle ${date(last.time)} · ${!isIdx() && isLive() ? '<span class="live">● harga live</span>' : `cek ${m.updated.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}`}` : '';
   const spinning = view.tab === 'bot' ? view.botLoading : m.loading;
   $('#app').innerHTML = `
     <header>
@@ -615,7 +668,7 @@ document.addEventListener('click', async (e) => {
     if (card.dataset.pos) {
       const [botId, tradeId] = card.dataset.pos.split(':');
       const bot = botById(botId), d = view.bots[botId], p = d?.open.find((x) => String(x.id) === tradeId);
-      if (p) openPosDetail({ ...p, opened: Date.parse(p.opened.replace(' ', 'T') + (/Z|\+/.test(p.opened) ? '' : 'Z')), cur: d.stake,
+      if (p) openPosDetail({ ...liveBotPos(p, d), opened: Date.parse(p.opened.replace(' ', 'T') + (/Z|\+/.test(p.opened) ? '' : 'Z')), cur: d.stake,
         title: bot.name, strategy: d.strategy, sellKey: card.dataset.pos });
     } else {
       const p = state.positions.find((x) => x.id === +card.dataset.mpos), now = view.tick[p?.coin]?.last;
@@ -689,6 +742,16 @@ document.addEventListener('visibilitychange', () => {
   if (!view.updated || Date.now() - view.updated > 5 * 60000) refresh();  // Binance selalu: posisi & notifikasi
   if (isIdx() && (!view.idx.updated || Date.now() - view.idx.updated > 5 * 60000)) refreshIdx();
 });
+// Indodax tidak punya stream publik tanpa login: harga ditarik tiap 10 detik selama tab Sinyal Indodax terbuka.
+// Data bot (saldo, posisi) dimuat ulang tiap 30 detik selama tab Bot/Riwayat terbuka.
+setInterval(async () => {
+  if (document.visibilityState !== 'visible' || !isIdx() || view.tab !== 'signals' || !view.idx.updated) return;
+  try { view.idx.tick = await tickersIdx(); liveRender(); } catch { /* coba lagi 10 detik lagi */ }
+}, 10000);
+setInterval(() => {
+  if (document.visibilityState === 'visible' && (view.tab === 'bot' || view.tab === 'history') && !view.botEdit) loadBot();
+}, 30000);
+
 if (Capacitor.isNativePlatform()) CapApp.addListener('backButton', () => {
   if ($('#overlay').classList.contains('show')) closeDetail();
   else if (view.tab !== 'signals') { view.tab = 'signals'; render(); }
